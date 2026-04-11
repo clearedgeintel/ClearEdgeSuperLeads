@@ -15,6 +15,7 @@ import nodemailer from 'nodemailer';
 import { storage } from '../storage';
 import { makeUnsubscribeUrl } from '../lib/unsubscribe';
 import { logger } from '../lib/logger';
+import { assertPlanLimit, recordPlanSend } from '../lib/planLimits';
 
 export interface SendOutreachOptions {
   workspaceId?: string | null;
@@ -111,6 +112,12 @@ export class EmailService {
       }
     }
 
+    // Phase 9 — Monthly plan limit check. Throws PlanLimitExceededError
+    // which the route maps to 402 { code: 'plan_limit' }. Runs before
+    // the daily cap so operators see the plan limit (the harder gate)
+    // first when both would fire.
+    await assertPlanLimit(options.workspaceId, 'email');
+
     // Daily email limit — enforces the workspace's warm-up curve.
     // Reads the cap from workspaces.daily_email_limit (falls back to
     // the roadmap's recommended 20/day starter), counts today's
@@ -181,6 +188,7 @@ export class EmailService {
         const messageId =
           (response.headers as Record<string, string>)?.['x-message-id'] ??
           String(response.statusCode);
+        await recordPlanSend(options.workspaceId, 'email');
         return { messageId, success: true, provider: 'sendgrid' };
       } catch (error: any) {
         logger.error({ err: error }, '[email] sendgrid send failed');
@@ -201,6 +209,7 @@ export class EmailService {
           'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
         },
       });
+      await recordPlanSend(options.workspaceId, 'email');
       return { messageId: info.messageId, success: true, provider: 'gmail' };
     } catch (error: any) {
       logger.error({ err: error }, '[email] gmail send failed');

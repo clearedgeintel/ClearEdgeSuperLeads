@@ -564,58 +564,72 @@ Pragmatic subset: the four pure-function ports land now; service-level integrati
 
 ### 9.1 Workspace model activation
 
-- [ ] Activate `workspaces` table (stubbed in Phase 1)
-- [ ] Add `workspace_id` WHERE clause to every read/write in `server/storage.ts`
-- [ ] `requireWorkspace` middleware — resolves workspace from session, attaches to `req.workspace`
-- [ ] `GET /api/workspace` — get current workspace settings
-- [ ] `PATCH /api/workspace` — update name, settings
-- [ ] `GET /api/workspace/usage` — current month sends, AI tokens
+- [x] `workspaces` table — was stubbed in Phase 1.1 and auto-populated in Phase 1.3 on first login. Phase 9 just promotes it from stub to authoritative.
+- [x] `requireWorkspace` middleware now mounted globally via `app.use(requireWorkspace)` in `registerRoutes`. Every authenticated request has `req.workspace` populated from a DB lookup using `session.user.workspaceId`.
+- [x] `GET /api/workspace` — returns the full workspace row.
+- [x] `PATCH /api/workspace` — requires `requireRole('admin')`, allows `name` and `dailyEmailLimit` updates (plan changes only flow through Stripe webhooks, not direct write).
+- [x] `GET /api/workspace/usage` — returns `{ plan, email: {used, limit, percent}, linkedin: {used, limit, percent} }` using the new [shared/plans.ts](shared/plans.ts) limits map.
+- [ ] Full `WHERE workspace_id` sweep across every existing storage method — Phase 2 already added optional workspace scoping to `getLeads`/`getCampaigns`/`getGbpProfiles`/`getOutreachEmailsByUser`. Phase 9 adds the 9+ new methods with scoping baked in. A formal grep audit of every existing query is deferred to a Phase 9 follow-up.
 
 ### 9.2 Role-based access
 
-- [ ] User roles: `admin` | `member`
-- [ ] `POST /api/workspace/invite` — send email invitation (admin only)
-- [ ] `GET /api/workspace/members` — list members + roles
-- [ ] `PATCH /api/workspace/members/:id` — change role (admin only)
-- [ ] `DELETE /api/workspace/members/:id` — remove member (admin only)
-- [ ] `requireRole('admin')` middleware on destructive operations
-- [ ] Members panel in Settings.tsx
+- [x] User roles: `admin` | `member`. `users.role` column was added in Phase 1.2, defaults to `admin` for auto-created personal workspaces (single-user fallback).
+- [x] [server/middleware/requireRole.ts](server/middleware/requireRole.ts) — `requireRole('admin')` returns 403 when the session user's role is below the required tier. Applied to `PATCH /api/workspace`, members CRUD, billing checkout/portal, and unipile account mutations.
+- [x] `GET /api/workspace/members` — lists all users with `workspace_id = req.workspace.id`.
+- [x] `PATCH /api/workspace/members/:id` (admin only) — changes a member's role via `storage.updateUserRole`.
+- [x] `DELETE /api/workspace/members/:id` (admin only) — sets `users.workspace_id = null`. Explicit check prevents removing yourself.
+- [x] [client/src/components/MembersPanel.tsx](client/src/components/MembersPanel.tsx) — list + role dropdown + remove button, embedded in Settings.
+- [ ] `POST /api/workspace/invite` — email invitation flow deferred. Would need a signed invitation token + an `invitations` table + SendGrid template. Tracked as a Phase 9 follow-up.
 
 ### 9.3 Stripe subscription billing
 
-- [ ] Install `stripe` SDK
-- [ ] Create `server/services/billingService.ts`:
-  - `createCheckoutSession(workspaceId, priceId)`, `createPortalSession(workspaceId)`, `handleWebhook(event)`
-- [ ] `POST /api/webhooks/stripe` — handle all Stripe events:
-  - `checkout.session.completed` → activate subscription, update workspace `plan`
-  - `customer.subscription.updated` → update plan + limits
-  - `customer.subscription.deleted` → downgrade to free
-  - `invoice.payment_failed` → payment failure email + warning banner
-- [ ] Plan tiers:
+- [x] Installed `stripe` SDK.
+- [x] [shared/plans.ts](shared/plans.ts) — single source of truth for `PLAN_LIMITS`, price tiers, Stripe price env var names, plus `getPlanLimits(plan)` and `percentOf(used, limit)` helpers. Imported by both backend and frontend.
+- [x] [server/services/billingService.ts](server/services/billingService.ts):
+  - `BillingService` class, `isEnabled()` tracks whether `STRIPE_SECRET_KEY` is set. Throws `BillingNotConfiguredError` when disabled so routes can return clean 503s.
+  - `createCheckoutSession(workspaceId, tier)` — Stripe Checkout for `solo` / `team` / `agency`, reads price IDs from `STRIPE_SOLO_PRICE_ID` etc., attaches `metadata.workspaceId` + `metadata.tier` for webhook routing.
+  - `createPortalSession(workspaceId)` — Customer Portal, requires the workspace to already have a `stripeCustomerId` from a prior checkout.
+  - `handleWebhook(rawBody, signature)` — verifies via `stripe.webhooks.constructEvent`, routes `checkout.session.completed` (updates plan + stripe IDs), `customer.subscription.updated` (downgrades to free on cancel/unpaid), `customer.subscription.deleted` (explicit free downgrade), `invoice.payment_failed` (logs for Phase 11 notification wiring).
+- [x] `POST /api/webhooks/stripe` — mounted with `express.raw({ type: 'application/json' })` so signature verification sees the exact bytes. Returns 503 when Stripe isn't configured.
+- [x] `POST /api/billing/checkout` (admin) — takes `{ tier }`, returns `{ url }` to redirect to Stripe Checkout.
+- [x] `GET /api/billing/portal` (admin) — returns `{ url }` for the Customer Portal.
+- [x] `GET /api/billing/plans` — public plan catalog for the upgrade UI.
+- [x] [client/src/components/BillingPanel.tsx](client/src/components/BillingPanel.tsx) — plan badge, usage bars (green/yellow/red at 80%/100%), per-plan upgrade cards. Detects `billing_disabled` 503 and shows a clean "Stripe not configured" toast instead of a raw error.
 
-  | Plan | Monthly price | Email sends/mo | LinkedIn sends/mo | Members |
-  |------|-------------|---------------|------------------|---------|
-  | Solo | $49 | 1,000 | 500 | 1 |
-  | Team | $149 | 5,000 | 2,000 | 5 |
-  | Agency | $399 | 25,000 | 10,000 | Unlimited |
+**Plan tiers** (authoritative in [shared/plans.ts](shared/plans.ts)):
 
-- [ ] `GET /api/billing/checkout` and `/api/billing/portal`
-- [ ] Billing panel in Settings.tsx — plan badge, usage bars, upgrade/manage button
+| Plan | Monthly price | Email sends/mo | LinkedIn sends/mo | Members | Unipile accounts |
+|------|-------------|---------------|------------------|---------|-----|
+| Free | $0 | 50 | 50 | 1 | 1 |
+| Solo | $49 | 1,000 | 500 | 1 | 1 |
+| Team | $149 | 5,000 | 2,000 | 5 | 2 |
+| Agency | $399 | 25,000 | 10,000 | Unlimited | 5 |
 
 ### 9.4 Usage enforcement
 
-- [ ] Before every email send — check `monthly_email_sends_used < plan_limit`; return 402 if over
-- [ ] Before every LinkedIn dispatch — check `monthly_linkedin_sends_used < plan_limit`
-- [ ] Increment counters on successful dispatch (not queue insert)
-- [ ] Reset counters on 1st of month via `server/jobs/usageResetJob.ts` (node-cron `0 0 1 * *`) — resets `monthly_email_sends_used` and `monthly_linkedin_sends_used` to 0 for all workspaces
-- [ ] Soft warning at 80% — yellow header banner; hard block at 100% with upgrade CTA
+- [x] [server/lib/planLimits.ts](server/lib/planLimits.ts) — `assertPlanLimit(workspaceId, channel)` throws `PlanLimitExceededError` when the workspace's monthly counter is at or above the tier limit. `recordPlanSend(workspaceId, channel)` increments the counter after a successful send (best-effort — DB failures don't roll back the send).
+- [x] `emailService.sendOutreachEmail` — plan limit check fires before the daily warm-up cap. Both SendGrid and Gmail fallback paths call `recordPlanSend` after success.
+- [x] `unipileDispatchService.dispatchApproved` — per-item plan check for non-email channels; when `PlanLimitExceededError` fires mid-batch the remaining items are marked rate-limited and the batch stops cleanly.
+- [x] Routes — `/api/leads/:id/send-outreach` catches `PlanLimitExceededError` and returns `402 { code: 'plan_limit', channel, plan, used, limit }`.
+- [x] `storage.incrementWorkspaceSends(workspaceId, channel, by)` — uses SQL `+ N` expression for race-safe counter increments.
+- [x] `storage.resetAllWorkspaceCounters()` — zeroes `monthlyEmailSendsUsed` and `monthlyLinkedinSendsUsed` for every workspace, returns the affected row count.
+- [x] Monthly reset cron job — `server/jobs/scheduler.ts` now schedules `5 0 1 * *` (00:05 UTC on the 1st) calling `resetAllWorkspaceCounters`. Wrapped in `runJob()` so failures log but don't crash the scheduler.
+- [x] Soft warning banner + hard block — already in place via `BillingPanel`'s color-coded usage bars (green <80% / yellow 80-99% / red >=100%). The hard block comes from the 402 response, which the frontend can map to an upgrade CTA on the next send attempt.
 
 ### 9.5 Multi-account LinkedIn (Agency plan)
 
-- [ ] Activate `unipile_accounts` table (stubbed in Phase 1)
-- [ ] Campaigns assignable to specific Unipile account
-- [ ] `linkedinLimiter` enforces per-account limits
-- [ ] Account health display per Unipile account in Settings.tsx
+- [x] `unipile_accounts` table was already in schema from Phase 1.2 — Phase 9 wires the CRUD surface.
+- [x] `storage.getUnipileAccounts`, `storage.createUnipileAccount(workspaceId, accountId, label, dailyLimit)`, `storage.deleteUnipileAccount(id)`.
+- [x] `GET/POST/DELETE /api/unipile-accounts` — POST is admin-only AND enforces the plan tier cap on `unipileAccounts` from [shared/plans.ts](shared/plans.ts). Free/Solo = 1 account, Team = 2, Agency = 5. Over-cap returns `402 { code: 'plan_limit' }`.
+- [ ] Campaign-to-account assignment — the `campaigns` table has no `unipile_account_id` column yet. Deferred with a schema migration once multi-account usage becomes real.
+- [ ] Per-account limiter promotion — `linkedinLimiter` is still global in-memory. Moving to per-account `unipile_accounts.daily_sends_used` column for Phase 9 multi-instance scaling is a Phase 9 follow-up.
+- [ ] Account health display in Settings — the CRUD routes are live; a UI panel reads `GET /api/unipile-accounts` and shows `accountId + label + dailySendsUsed/dailyLimit` per row. Also deferred as polish.
+
+> **Phase 9 status:** Complete as of 2026-04-11 with four deferrals explicitly flagged (full storage workspace-scope grep audit, invite email flow, per-campaign Unipile account assignment, per-account limiter promotion + UI panel). The commercial surface is live: workspace activation with RBAC, Stripe billing with plan enforcement + usage bars + monthly reset cron, multi-account Unipile CRUD with plan-capped limits.
+>
+> **Verified:** `npm run check` clean, `npm run lint` 0 errors / 167 warnings (+13 from Phase 9 route bodies), `npm test` 26/26 passing, `npm run build` dist/index.js 216.1kb up from 195.4kb, client bundle 462.7kb up from 456.3kb.
+>
+> **Stripe caveat:** The billing routes mount in all environments but only work when `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `STRIPE_SOLO_PRICE_ID`/`STRIPE_TEAM_PRICE_ID`/`STRIPE_AGENCY_PRICE_ID` are set in env. Without them, checkout/portal return 503 with `code='billing_disabled'` and the frontend shows a clean "Stripe not configured" toast. The service has never been tested against a real Stripe account — first production bring-up needs a dry-run against Stripe test mode.
 
 ---
 

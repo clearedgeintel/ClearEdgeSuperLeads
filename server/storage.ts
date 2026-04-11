@@ -17,7 +17,9 @@ import {
   appConfig,
   suppressionList,
   auditLog,
+  unipileAccounts,
   type User,
+  type UnipileAccount,
   type UpsertUser,
   type Lead,
   type InsertLead,
@@ -159,6 +161,99 @@ export class DatabaseStorage implements IStorage {
   async getWorkspace(id: string): Promise<Workspace | undefined> {
     const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, id));
     return workspace;
+  }
+
+  async updateWorkspace(id: string, updates: Partial<Workspace>): Promise<Workspace> {
+    const [row] = await db
+      .update(workspaces)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(workspaces.id, id))
+      .returning();
+    return row;
+  }
+
+  async incrementWorkspaceSends(
+    workspaceId: string,
+    channel: 'email' | 'linkedin',
+    by: number = 1
+  ): Promise<void> {
+    const column =
+      channel === 'email'
+        ? workspaces.monthlyEmailSendsUsed
+        : workspaces.monthlyLinkedinSendsUsed;
+    await db
+      .update(workspaces)
+      .set({
+        [channel === 'email' ? 'monthlyEmailSendsUsed' : 'monthlyLinkedinSendsUsed']:
+          sql`${column} + ${by}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(workspaces.id, workspaceId));
+  }
+
+  async resetAllWorkspaceCounters(): Promise<number> {
+    const rows = await db
+      .update(workspaces)
+      .set({
+        monthlyEmailSendsUsed: 0,
+        monthlyLinkedinSendsUsed: 0,
+        updatedAt: new Date(),
+      })
+      .returning({ id: workspaces.id });
+    return rows.length;
+  }
+
+  async getWorkspaceMembers(workspaceId: string): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.workspaceId, workspaceId));
+  }
+
+  async updateUserRole(userId: string, role: string): Promise<User> {
+    const [row] = await db
+      .update(users)
+      .set({ role, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return row;
+  }
+
+  async removeUserFromWorkspace(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ workspaceId: null, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  }
+
+  // Unipile accounts (Phase 9.5 — Agency multi-account)
+  async getUnipileAccounts(workspaceId: string): Promise<UnipileAccount[]> {
+    return await db
+      .select()
+      .from(unipileAccounts)
+      .where(eq(unipileAccounts.workspaceId, workspaceId))
+      .orderBy(asc(unipileAccounts.createdAt));
+  }
+
+  async createUnipileAccount(
+    workspaceId: string,
+    accountId: string,
+    label: string | null,
+    dailyLimit: number = 50
+  ): Promise<UnipileAccount> {
+    const [row] = await db
+      .insert(unipileAccounts)
+      .values({
+        id: nanoid(),
+        workspaceId,
+        accountId,
+        label,
+        dailyLimit,
+        dailySendsUsed: 0,
+      })
+      .returning();
+    return row;
+  }
+
+  async deleteUnipileAccount(id: string): Promise<void> {
+    await db.delete(unipileAccounts).where(eq(unipileAccounts.id, id));
   }
 
   async createPersonalWorkspace(userId: string, email: string | null): Promise<Workspace> {

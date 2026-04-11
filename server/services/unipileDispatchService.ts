@@ -13,6 +13,7 @@ import {
   humanDelay,
 } from '../lib/linkedinLimiter';
 import { logger } from '../lib/logger';
+import { assertPlanLimit, recordPlanSend, PlanLimitExceededError } from '../lib/planLimits';
 import type { SendQueueItem, CampaignStep } from '@shared/schema';
 
 export interface DispatchResult {
@@ -116,11 +117,26 @@ export class UnipileDispatchService {
       }
 
       try {
+        // Phase 9 — plan limit check before each dispatch. Breaks the
+        // batch cleanly when the workspace has hit its monthly allowance.
+        // Email items go through emailService's own check, so this only
+        // guards the LinkedIn path.
+        if (item.channel !== 'email') {
+          await assertPlanLimit(item.workspaceId, 'linkedin');
+        }
+
         const dispatched = await this.dispatchSingle(item, accountId);
-        if (dispatched === 'sent') result.sent++;
-        else if (dispatched === 'rate_limited') result.rateLimited++;
+        if (dispatched === 'sent') {
+          result.sent++;
+          await recordPlanSend(item.workspaceId, 'linkedin');
+        } else if (dispatched === 'rate_limited') result.rateLimited++;
         else result.failed++;
       } catch (err) {
+        if (err instanceof PlanLimitExceededError) {
+          logger.warn({ err: err.message }, '[dispatch] plan limit hit, stopping batch');
+          result.rateLimited += items.length - result.sent - result.failed - result.rateLimited;
+          break;
+        }
         console.error('[dispatch] error', item.id, err);
         result.failed++;
         await this.recordFailure(item, err instanceof Error ? err.message : String(err));

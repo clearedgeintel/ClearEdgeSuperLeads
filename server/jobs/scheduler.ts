@@ -12,6 +12,7 @@ import cron from 'node-cron';
 import { queueGenerationService } from '../services/queueGenerationService';
 import { unipileDispatchService } from '../services/unipileDispatchService';
 import { inboxSyncService } from '../services/inboxSyncService';
+import { storage } from '../storage';
 import { logger } from '../lib/logger';
 
 type JobFn = () => Promise<void>;
@@ -70,8 +71,19 @@ export function startScheduler(): void {
     });
   });
 
+  // Phase 9 — monthly usage counter reset. Fires at 00:05 UTC on the
+  // 1st of every month so we don't race the Stripe invoice rollover.
+  // Resets monthly_email_sends_used + monthly_linkedin_sends_used to
+  // zero for every workspace.
+  cron.schedule('5 0 1 * *', () => {
+    void runJob('usageReset', async () => {
+      const resetCount = await storage.resetAllWorkspaceCounters();
+      logger.info({ workspacesReset: resetCount }, 'monthly usage reset complete');
+    });
+  });
+
   started = true;
   logger.info(
-    'scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m)'
+    'scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m, usageReset 0:05 on 1st)'
   );
 }

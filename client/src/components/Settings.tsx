@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { SettingsIcon, Save, DollarSign, Zap } from "lucide-react";
 import SuppressionList from "./SuppressionList";
+import MembersPanel from "./MembersPanel";
+import BillingPanel from "./BillingPanel";
 
 interface SettingsResponse {
   values: Record<string, string>;
@@ -189,6 +191,12 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Phase 9 — Billing + plan tier + usage bars */}
+      <BillingPanel />
+
+      {/* Phase 9 — Members list + role management */}
+      <MembersPanel />
 
       {/* Suppression list (Phase 7 — CAN-SPAM/GDPR compliance) */}
       <SuppressionList />

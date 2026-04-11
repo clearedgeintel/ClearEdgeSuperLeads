@@ -8,6 +8,8 @@ import { pool } from "./db";
 import { googleAuthService } from "./services/googleAuth";
 import { aiService } from "./services/aiService";
 import { emailService, EmailSuppressedError, EmailUndeliverableError, EmailDailyLimitError } from "./services/emailService";
+import { PlanLimitExceededError } from "./lib/planLimits";
+import { billingService, BillingNotConfiguredError } from "./services/billingService";
 import { verifyEmailWithHunter } from "./services/emailVerification";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
@@ -22,6 +24,8 @@ import { optimizationService } from "./services/optimizationService";
 import { apiKeyAuth } from "./middleware/auth";
 import { linkedinLimiter, aiLimiter, dispatchLimiter } from "./middleware/rateLimit";
 import { validateBody } from "./middleware/validate";
+import { requireWorkspace } from "./middleware/requireWorkspace";
+import { requireRole } from "./middleware/requireRole";
 import {
   linkedinSearchSchema,
   linkedinSaveProfilesSchema,
@@ -29,6 +33,7 @@ import {
   createCampaignStepSchema,
   generateMessageSchema,
 } from "@shared/validators";
+import { PLAN_LIMITS, getPlanLimits, percentOf, type PlanTier } from "@shared/plans";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 
 import { nanoid } from "nanoid";
@@ -184,6 +189,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Setup fallback authentication
   setupFallbackAuth(app);
+
+  // Phase 9 — mount requireWorkspace globally so every authenticated
+  // request has req.workspace populated. The middleware is a no-op
+  // when the user has no workspaceId or no session, so it's safe to
+  // run before the Google OAuth + unsubscribe public routes. Phase 9
+  // promotes it from "informational" to "injected on every request".
+  app.use(requireWorkspace);
 
   // Google OAuth routes
   app.get('/api/auth/google', (req, res) => {
@@ -638,6 +650,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             success: false,
             error: err.message,
             code: 'daily_limit',
+            used: err.used,
+            limit: err.limit,
+          });
+        }
+        if (err instanceof PlanLimitExceededError) {
+          return res.status(402).json({
+            success: false,
+            error: err.message,
+            code: 'plan_limit',
+            channel: err.channel,
+            plan: err.plan,
             used: err.used,
             limit: err.limit,
           });
@@ -1108,6 +1131,281 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+  // Phase 9 — Stripe billing. Disabled when STRIPE_SECRET_KEY isn't
+  // set; the routes still mount so the frontend gets a clean 503
+  // "billing not configured" response instead of a 404.
+  app.get('/api/billing/plans', requireAuth, (_req, res) => {
+    res.json({
+      success: true,
+      data: Object.entries(PLAN_LIMITS).map(([tier, limits]) => ({
+        tier,
+        name: limits.name,
+        priceUsdPerMonth: limits.priceUsdPerMonth,
+        emailSendsPerMonth: limits.emailSendsPerMonth,
+        linkedinSendsPerMonth: limits.linkedinSendsPerMonth,
+        members: limits.members === Number.POSITIVE_INFINITY ? 'unlimited' : limits.members,
+        unipileAccounts: limits.unipileAccounts,
+      })),
+    });
+  });
+
+  app.post('/api/billing/checkout', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const { tier } = req.body ?? {};
+      if (!['solo', 'team', 'agency'].includes(tier)) {
+        return res.status(400).json({ success: false, error: 'tier must be solo/team/agency' });
+      }
+      const { url } = await billingService.createCheckoutSession(
+        user.workspaceId,
+        tier as 'solo' | 'team' | 'agency'
+      );
+      res.json({ success: true, data: { url } });
+    } catch (error: any) {
+      if (error instanceof BillingNotConfiguredError) {
+        return res
+          .status(503)
+          .json({ success: false, error: error.message, code: 'billing_disabled' });
+      }
+      console.error('Billing checkout error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/billing/portal', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const { url } = await billingService.createPortalSession(user.workspaceId);
+      res.json({ success: true, data: { url } });
+    } catch (error: any) {
+      if (error instanceof BillingNotConfiguredError) {
+        return res
+          .status(503)
+          .json({ success: false, error: error.message, code: 'billing_disabled' });
+      }
+      console.error('Billing portal error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post(
+    '/api/webhooks/stripe',
+    express.raw({ type: 'application/json' }),
+    async (req, res) => {
+      try {
+        const signature = req.header('stripe-signature');
+        if (!signature) {
+          return res.status(401).json({ success: false, error: 'Missing stripe-signature header' });
+        }
+        const rawBody = Buffer.isBuffer(req.body)
+          ? req.body
+          : Buffer.from(JSON.stringify(req.body));
+        const eventType = await billingService.handleWebhook(rawBody, signature);
+        res.json({ success: true, eventType });
+      } catch (error: any) {
+        if (error instanceof BillingNotConfiguredError) {
+          return res.status(503).json({ success: false, error: error.message });
+        }
+        console.error('Stripe webhook error:', error);
+        res.status(400).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Phase 9 — Workspace management routes. The workspace itself was
+  // stubbed in Phase 1.1 and auto-created in Phase 1.3 on first login;
+  // these routes surface the record for the settings page and let
+  // operators rename / change the plan tier (via Stripe webhook, not
+  // direct write).
+  app.get('/api/workspace', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const workspace = await storage.getWorkspace(user.workspaceId);
+      if (!workspace) return res.status(404).json({ success: false, error: 'Workspace not found' });
+      res.json({ success: true, data: workspace });
+    } catch (error: any) {
+      console.error('Get workspace error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/workspace', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const { name, dailyEmailLimit } = req.body ?? {};
+      const updates: Record<string, unknown> = {};
+      if (typeof name === 'string') updates.name = name;
+      if (typeof dailyEmailLimit === 'number') updates.dailyEmailLimit = dailyEmailLimit;
+      const workspace = await storage.updateWorkspace(user.workspaceId, updates);
+      res.json({ success: true, data: workspace });
+    } catch (error: any) {
+      console.error('Update workspace error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/workspace/usage', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const workspace = await storage.getWorkspace(user.workspaceId);
+      if (!workspace) return res.status(404).json({ success: false, error: 'Workspace not found' });
+      const limits = getPlanLimits(workspace.plan);
+      res.json({
+        success: true,
+        data: {
+          plan: workspace.plan ?? 'free',
+          email: {
+            used: workspace.monthlyEmailSendsUsed ?? 0,
+            limit: limits.emailSendsPerMonth,
+            percent: percentOf(workspace.monthlyEmailSendsUsed ?? 0, limits.emailSendsPerMonth),
+          },
+          linkedin: {
+            used: workspace.monthlyLinkedinSendsUsed ?? 0,
+            limit: limits.linkedinSendsPerMonth,
+            percent: percentOf(
+              workspace.monthlyLinkedinSendsUsed ?? 0,
+              limits.linkedinSendsPerMonth
+            ),
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error('Get workspace usage error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 9 — Members list / role change / remove
+  app.get('/api/workspace/members', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const members = await storage.getWorkspaceMembers(user.workspaceId);
+      res.json({ success: true, data: members });
+    } catch (error: any) {
+      console.error('Get members error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/workspace/members/:id', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const { role } = req.body ?? {};
+      if (role !== 'admin' && role !== 'member') {
+        return res.status(400).json({ success: false, error: 'role must be admin or member' });
+      }
+      const updated = await storage.updateUserRole(req.params.id, role);
+      res.json({ success: true, data: updated });
+    } catch (error: any) {
+      console.error('Update member error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete(
+    '/api/workspace/members/:id',
+    requireAuth,
+    requireRole('admin'),
+    async (req, res) => {
+      try {
+        const user = req.session.user!;
+        if (req.params.id === user.id) {
+          return res
+            .status(400)
+            .json({ success: false, error: 'Cannot remove yourself from the workspace' });
+        }
+        await storage.removeUserFromWorkspace(req.params.id);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Remove member error:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Phase 9.5 — Unipile multi-account management (Agency tier).
+  // Routes mount for every tier but enforcement lives at the plan
+  // level: free/solo plans are capped at 1 Unipile account via the
+  // POST handler's explicit check.
+  app.get('/api/unipile-accounts', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.json({ success: true, data: [] });
+      }
+      const accounts = await storage.getUnipileAccounts(user.workspaceId);
+      res.json({ success: true, data: accounts });
+    } catch (error: any) {
+      console.error('Get unipile accounts error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/unipile-accounts', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(400).json({ success: false, error: 'No workspace' });
+      }
+      const workspace = await storage.getWorkspace(user.workspaceId);
+      const limits = getPlanLimits(workspace?.plan);
+      const existing = await storage.getUnipileAccounts(user.workspaceId);
+      if (existing.length >= limits.unipileAccounts) {
+        return res.status(402).json({
+          success: false,
+          error: `Plan ${workspace?.plan ?? 'free'} allows ${limits.unipileAccounts} Unipile account(s). Upgrade to Agency for more.`,
+          code: 'plan_limit',
+        });
+      }
+      const { accountId, label, dailyLimit } = req.body ?? {};
+      if (!accountId) {
+        return res.status(400).json({ success: false, error: 'accountId is required' });
+      }
+      const account = await storage.createUnipileAccount(
+        user.workspaceId,
+        accountId,
+        label ?? null,
+        typeof dailyLimit === 'number' ? dailyLimit : 50
+      );
+      res.json({ success: true, data: account });
+    } catch (error: any) {
+      console.error('Create unipile account error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete(
+    '/api/unipile-accounts/:id',
+    requireAuth,
+    requireRole('admin'),
+    async (req, res) => {
+      try {
+        await storage.deleteUnipileAccount(req.params.id);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete unipile account error:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
 
   // Settings (Phase 6) — workspace-scoped app_config read/write. Secrets
   // like API keys live in .env at the server level; this endpoint only
