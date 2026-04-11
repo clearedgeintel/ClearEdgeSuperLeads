@@ -15,12 +15,30 @@ import { linkedInSearchService, LinkedInSearchLimitError } from "./services/link
 import { queueGenerationService } from "./services/queueGenerationService";
 import { unipileDispatchService } from "./services/unipileDispatchService";
 import { inboxSyncService } from "./services/inboxSyncService";
+import { analyticsService } from "./services/analyticsService";
+import { optimizationService } from "./services/optimizationService";
 import { apiKeyAuth } from "./middleware/auth";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 
 import { nanoid } from "nanoid";
 import type { PlaceDetails } from "./services/placesApi";
 import { aiQueue } from "./lib/backgroundQueue";
+
+// Serialize an array of objects into an RFC-4180 CSV string. Values are
+// always wrapped in double quotes (embedded quotes doubled) so column
+// values that include commas or newlines don't break downstream parsers.
+function toCsv(columns: readonly string[], rows: readonly object[]): string {
+  const escape = (v: unknown): string => {
+    if (v === null || v === undefined) return '""';
+    const s = v instanceof Date ? v.toISOString() : String(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const header = columns.join(',');
+  const body = rows
+    .map((r) => columns.map((c) => escape((r as Record<string, unknown>)[c])).join(','))
+    .join('\n');
+  return `${header}\n${body}`;
+}
 
 // Queue background tasks for a lead. Email discovery and AI analysis
 // run with limited concurrency to avoid hammering rate limits.
@@ -971,7 +989,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Analytics routes
+  // Phase 5 analytics — cross-channel overview, campaign comparison,
+  // API cost dashboard, and A/B prompt leaderboard
+  app.get('/api/analytics/overview', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const days = parseInt((req.query.days as string) || '30');
+      const overview = await analyticsService.getOverview(days, user.workspaceId);
+      res.json({ success: true, data: overview });
+    } catch (error: any) {
+      console.error('Analytics overview error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/campaigns', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const data = await analyticsService.getCampaignComparison(user.workspaceId);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('Campaign comparison error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/api-costs', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const days = parseInt((req.query.days as string) || '30');
+      const data = await analyticsService.getApiCosts(days, user.workspaceId);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('API costs error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/analytics/prompt-leaderboard', requireAuth, async (_req, res) => {
+    try {
+      const data = await analyticsService.getPromptLeaderboard();
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('Prompt leaderboard error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 5 optimization — auto-pause + Claude suggestions + VoC analysis
+  app.post('/api/optimize/campaigns', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const result = await optimizationService.optimizeCampaigns(user.workspaceId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Optimize campaigns error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/optimize/voc-analysis', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const days = parseInt((req.query.days as string) || '30');
+      const result = await optimizationService.vocAnalysis(days, user.workspaceId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('VoC analysis error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/optimize/insights', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const data = await optimizationService.getInsights(user.workspaceId);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('Get insights error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // CSV exports (Phase 5)
+  app.get('/api/export/leads.csv', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const rows = await storage.getLeads(user.id, user.workspaceId);
+      const columns = [
+        'id',
+        'leadSource',
+        'businessName',
+        'fullName',
+        'email',
+        'phone',
+        'website',
+        'linkedinUrl',
+        'title',
+        'company',
+        'industry',
+        'status',
+        'priority',
+        'aiScore',
+        'hubspotCompanyId',
+        'createdAt',
+      ] as const;
+      const csv = toCsv(columns, rows);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="leads.csv"');
+      res.send(csv);
+    } catch (error: any) {
+      console.error('Leads CSV export error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/export/campaigns.csv', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const rows = await analyticsService.getCampaignComparison(user.workspaceId);
+      const columns = [
+        'id',
+        'name',
+        'status',
+        'outreachChannel',
+        'enrolled',
+        'contacted',
+        'connected',
+        'messagesSent',
+        'replied',
+        'replyRate',
+        'positiveReplies',
+        'positiveRate',
+        'meetingsBooked',
+      ] as const;
+      const csv = toCsv(columns, rows);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="campaigns.csv"');
+      res.send(csv);
+    } catch (error: any) {
+      console.error('Campaigns CSV export error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Legacy GBP summary route kept for the existing Analytics.tsx widget
   app.get('/api/analytics/summary', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;

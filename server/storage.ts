@@ -10,6 +10,8 @@ import {
   engagementEvents,
   promptVersions,
   knowledgeBase,
+  apiUsageLog,
+  vocInsights,
   outreachEmails,
   workspaces,
   appConfig,
@@ -32,6 +34,10 @@ import {
   type PromptVersion,
   type KnowledgeEntry,
   type InsertKnowledgeEntry,
+  type ApiUsageLogEntry,
+  type InsertApiUsageLogEntry,
+  type VocInsight,
+  type InsertVocInsight,
   type OutreachEmail,
   type InsertOutreachEmail,
   type Workspace,
@@ -867,6 +873,245 @@ export class DatabaseStorage implements IStorage {
       .update(outreachEmails)
       .set(updates)
       .where(eq(outreachEmails.id, id));
+  }
+
+  // ============================================================
+  // Phase 5 — Analytics + optimization storage methods
+  // ============================================================
+
+  async countLeads(workspaceId?: string | null): Promise<number> {
+    const conditions = [];
+    if (workspaceId) conditions.push(eq(leads.workspaceId, workspaceId));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(conditions.length ? and(...conditions) : undefined);
+    return row?.count ?? 0;
+  }
+
+  async countActiveCampaigns(workspaceId?: string | null): Promise<number> {
+    const conditions = [eq(campaigns.status, 'active')];
+    if (workspaceId) conditions.push(eq(campaigns.workspaceId, workspaceId));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  async countSuccessfulSendsTotal(workspaceId?: string | null, since?: Date): Promise<number> {
+    const conditions = [eq(sendLog.dispatchStatus, 'success')];
+    if (workspaceId) conditions.push(eq(sendLog.workspaceId, workspaceId));
+    if (since) conditions.push(gte(sendLog.dispatchedAt, since));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sendLog)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  async countSuccessfulSendsForCampaign(campaignId: string): Promise<number> {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sendLog)
+      .where(
+        and(eq(sendLog.campaignId, campaignId), eq(sendLog.dispatchStatus, 'success'))
+      );
+    return row?.count ?? 0;
+  }
+
+  async countSendsByStepType(
+    stepTypes: string[],
+    workspaceId?: string | null,
+    since?: Date
+  ): Promise<number> {
+    if (stepTypes.length === 0) return 0;
+    const conditions = [
+      eq(sendLog.dispatchStatus, 'success'),
+      inArray(sendLog.stepType, stepTypes),
+    ];
+    if (workspaceId) conditions.push(eq(sendLog.workspaceId, workspaceId));
+    if (since) conditions.push(gte(sendLog.dispatchedAt, since));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sendLog)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  async countEngagementEvents(opts: {
+    eventType: string;
+    sentiment?: string;
+    since?: Date;
+    workspaceId?: string | null;
+  }): Promise<number> {
+    const conditions = [eq(engagementEvents.eventType, opts.eventType)];
+    if (opts.sentiment) conditions.push(eq(engagementEvents.sentiment, opts.sentiment));
+    if (opts.since) conditions.push(gte(engagementEvents.occurredAt, opts.since));
+    if (opts.workspaceId) conditions.push(eq(engagementEvents.workspaceId, opts.workspaceId));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(engagementEvents)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  async getSentLeadIdsForCampaign(campaignId: string): Promise<string[]> {
+    const rows = await db
+      .selectDistinct({ leadId: sendLog.leadId })
+      .from(sendLog)
+      .where(
+        and(eq(sendLog.campaignId, campaignId), eq(sendLog.dispatchStatus, 'success'))
+      );
+    return rows.map((r) => r.leadId);
+  }
+
+  async countEventsForLeadIds(
+    eventType: string,
+    leadIds: string[],
+    sentiment?: string
+  ): Promise<number> {
+    if (leadIds.length === 0) return 0;
+    const conditions = [
+      eq(engagementEvents.eventType, eventType),
+      inArray(engagementEvents.leadId, leadIds),
+    ];
+    if (sentiment) conditions.push(eq(engagementEvents.sentiment, sentiment));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(engagementEvents)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  async getEnrollmentLeadStatuses(campaignId: string): Promise<string[]> {
+    const rows = await db
+      .select({ status: leads.status })
+      .from(campaignEnrollments)
+      .leftJoin(leads, eq(campaignEnrollments.leadId, leads.id))
+      .where(eq(campaignEnrollments.campaignId, campaignId));
+    return rows.map((r) => r.status ?? 'new');
+  }
+
+  async getAllCampaignsForAnalytics(workspaceId?: string | null): Promise<Campaign[]> {
+    const conditions = [];
+    if (workspaceId) conditions.push(eq(campaigns.workspaceId, workspaceId));
+    return await db
+      .select()
+      .from(campaigns)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(campaigns.createdAt));
+  }
+
+  async getActiveCampaignsForOptimization(workspaceId?: string | null): Promise<Campaign[]> {
+    const conditions = [eq(campaigns.status, 'active')];
+    if (workspaceId) conditions.push(eq(campaigns.workspaceId, workspaceId));
+    return await db.select().from(campaigns).where(and(...conditions));
+  }
+
+  async getRecentReplyEvents(
+    limit: number,
+    workspaceId?: string | null,
+    since?: Date
+  ): Promise<Array<EngagementEvent & { lead: Lead | null }>> {
+    const conditions = [eq(engagementEvents.eventType, 'reply_received')];
+    if (workspaceId) conditions.push(eq(engagementEvents.workspaceId, workspaceId));
+    if (since) conditions.push(gte(engagementEvents.occurredAt, since));
+
+    const rows = await db
+      .select({ event: engagementEvents, lead: leads })
+      .from(engagementEvents)
+      .leftJoin(leads, eq(engagementEvents.leadId, leads.id))
+      .where(and(...conditions))
+      .orderBy(desc(engagementEvents.occurredAt))
+      .limit(limit);
+
+    return rows.map((r) => ({ ...r.event, lead: r.lead }));
+  }
+
+  async getTopPromptVersions(limit: number = 20): Promise<Array<PromptVersion & { campaignName: string | null }>> {
+    const rows = await db
+      .select({
+        version: promptVersions,
+        campaignName: campaigns.name,
+      })
+      .from(promptVersions)
+      .leftJoin(campaigns, eq(promptVersions.campaignId, campaigns.id))
+      .where(sql`${promptVersions.timesUsed} > 0`)
+      .orderBy(desc(promptVersions.replyCount))
+      .limit(limit);
+    return rows.map((r) => ({ ...r.version, campaignName: r.campaignName }));
+  }
+
+  // API usage log (Phase 5 — promoted from Phase 3 console shim)
+  async createApiUsageLog(entryData: Omit<InsertApiUsageLogEntry, 'id'>): Promise<ApiUsageLogEntry> {
+    const [row] = await db
+      .insert(apiUsageLog)
+      .values({ id: nanoid(), ...entryData })
+      .returning();
+    return row;
+  }
+
+  async getApiUsageLogsSince(
+    since: Date,
+    workspaceId?: string | null
+  ): Promise<ApiUsageLogEntry[]> {
+    const conditions = [gte(apiUsageLog.createdAt, since)];
+    if (workspaceId) conditions.push(eq(apiUsageLog.workspaceId, workspaceId));
+    return await db
+      .select()
+      .from(apiUsageLog)
+      .where(and(...conditions));
+  }
+
+  // VoC insights
+  async findSimilarVocInsight(
+    insightType: string,
+    contentPrefix: string,
+    workspaceId?: string | null
+  ): Promise<VocInsight | undefined> {
+    const conditions = [
+      eq(vocInsights.insightType, insightType),
+      sql`${vocInsights.content} ilike ${'%' + contentPrefix + '%'}`,
+    ];
+    if (workspaceId) conditions.push(eq(vocInsights.workspaceId, workspaceId));
+    const [row] = await db
+      .select()
+      .from(vocInsights)
+      .where(and(...conditions))
+      .limit(1);
+    return row;
+  }
+
+  async createVocInsight(
+    entryData: Omit<InsertVocInsight, 'id' | 'frequency' | 'lastSeenAt' | 'createdAt'>
+  ): Promise<VocInsight> {
+    const [row] = await db
+      .insert(vocInsights)
+      .values({ id: nanoid(), ...entryData })
+      .returning();
+    return row;
+  }
+
+  async bumpVocInsight(id: string): Promise<void> {
+    await db
+      .update(vocInsights)
+      .set({
+        frequency: sql`${vocInsights.frequency} + 1`,
+        lastSeenAt: new Date(),
+      })
+      .where(eq(vocInsights.id, id));
+  }
+
+  async getVocInsights(workspaceId?: string | null): Promise<VocInsight[]> {
+    const conditions = [];
+    if (workspaceId) conditions.push(eq(vocInsights.workspaceId, workspaceId));
+    return await db
+      .select()
+      .from(vocInsights)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(vocInsights.frequency))
+      .limit(50);
   }
 }
 

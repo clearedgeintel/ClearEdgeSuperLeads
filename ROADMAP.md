@@ -378,15 +378,24 @@ Replaces the original `n8n/linkedin-queue-workflow.json` with an in-process back
 
 ### 5.1 Backend analytics service
 
-- [ ] Port `api/analytics.js` → `server/services/analyticsService.ts` — pipeline metrics, campaign stats, A/B report, token cost
-- [ ] Port `api/optimization.js` → `server/services/optimizationService.ts` — auto-pause, prompt suggestions
-- [ ] `GET /api/analytics/overview`, `/campaigns/:id`, `/ab-report`
+- [x] Port `api/analytics.js` → [server/services/analyticsService.ts](server/services/analyticsService.ts) — `getOverview(days, workspaceId)`, `getCampaignComparison(workspaceId)`, `getApiCosts(days, workspaceId)`, `getPromptLeaderboard()`.
+- [x] Port `api/optimization.js` → [server/services/optimizationService.ts](server/services/optimizationService.ts) — `optimizeCampaigns` (auto-pause below `autoPauseThreshold` + Claude-haiku suggestions), `vocAnalysis` (groups recent replies into objections/interests/questions/trends, upserts into `voc_insights`), `getInsights`.
+- [x] `GET /api/analytics/overview` (cross-channel pipeline metrics for the last N days)
+- [x] `GET /api/analytics/campaigns` (per-campaign comparison — enrolled, contacted, connected, sent, replies, reply rate, positive rate, meetings booked)
+- [x] `GET /api/analytics/api-costs` (calls by provider, token totals, estimated Claude spend)
+- [x] `GET /api/analytics/prompt-leaderboard` (top 20 prompt variants sorted by reply count)
+- [x] `POST /api/optimize/campaigns`, `POST /api/optimize/voc-analysis`, `GET /api/optimize/insights`
+- [x] Added `api_usage_log` and `voc_insights` tables to [shared/schema.ts](shared/schema.ts); `apiTracker.trackApiCall` promoted from Phase 3 console shim to a real DB writer with console fallback on DB failure. Every Claude call across queueGenerationService, replyClassifier, and optimizationService now flows through it.
+- [x] Storage methods for all the counts: `countLeads`, `countActiveCampaigns`, `countSuccessfulSendsTotal`, `countSuccessfulSendsForCampaign`, `countSendsByStepType`, `countEngagementEvents` (filterable by type/sentiment/since/workspace), `getSentLeadIdsForCampaign`, `countEventsForLeadIds`, `getEnrollmentLeadStatuses`, `getAllCampaignsForAnalytics`, `getActiveCampaignsForOptimization`, `getRecentReplyEvents`, `getTopPromptVersions`, `createApiUsageLog`, `getApiUsageLogsSince`, VoC CRUD (`findSimilarVocInsight`, `createVocInsight`, `bumpVocInsight`, `getVocInsights`).
 
 ### 5.2 Frontend analytics components
 
-- [ ] Extend `Analytics.tsx` — Google pipeline + LinkedIn pipeline + cross-channel view
-- [ ] Build `Reports.tsx` — campaign comparison, A/B leaderboard, weekly volume chart, AI cost dashboard
-- [ ] CSV export for leads and campaign results
+- [x] Extended [Analytics.tsx](client/src/components/Analytics.tsx) with a new LinkedIn Pipeline card at the top (consumes `/api/analytics/overview`) — 6 stat tiles: connection requests, accepted, messages sent, replies, positive replies, meetings booked, with rate % subtitles. Existing GBP email pipeline card stays below it unchanged.
+- [x] Built [Reports.tsx](client/src/components/Reports.tsx) as a new 9th Dashboard tab. Three sections: Campaign Comparison table (enrolled/sent/replies/reply%/positive%/meetings per campaign), A/B Prompt Leaderboard (top variants ranked by reply count with preview and rates), AI Cost Dashboard (total calls, estimated Claude spend, input/output token totals, calls by provider). Weekly volume chart deferred to Phase 6 final pass — non-blocking for the leaderboard/cost loop.
+- [x] CSV export — `GET /api/export/leads.csv` and `GET /api/export/campaigns.csv` routes. Reports.tsx header has two "Leads CSV" / "Campaigns CSV" download buttons backed by `<a href={…} download>`. RFC-4180 quoting via a shared `toCsv(columns, rows)` helper in `server/routes.ts`.
+- [x] [Dashboard.tsx](client/src/pages/Dashboard.tsx) tab list grows from 8 to **9** — added `reports` tab routing to `Reports`.
+
+> **Phase 5 status:** Complete as of 2026-04-11. Weekly volume chart is the only deferred bullet (low-value vs. the leaderboard/cost dashboard). Check ✓, lint ✓ (0 errors, 143 warnings — 8 new from Phase 5 route bodies; all pre-existing `any` debt that Phase 6 Zod sweep will clean up), build ✓ (dist/index.js 155.6kb up from 130.6kb, client bundle 437kb up from 427kb).
 
 ---
 

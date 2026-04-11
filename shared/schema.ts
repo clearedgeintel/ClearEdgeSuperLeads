@@ -347,6 +347,48 @@ export const engagementEvents = pgTable(
 );
 
 // ============================================================
+// api_usage_log — Claude/Unipile call log for cost tracking (Phase 5)
+// ============================================================
+export const apiUsageLog = pgTable(
+  'api_usage_log',
+  {
+    id: varchar('id').primaryKey().notNull(),
+    workspaceId: varchar('workspace_id').references(() => workspaces.id),
+    provider: varchar('provider').notNull(), // claude | unipile | places | hubspot
+    endpoint: varchar('endpoint').notNull(),
+    model: varchar('model'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    campaignId: varchar('campaign_id').references(() => campaigns.id),
+    leadId: varchar('lead_id').references(() => leads.id),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('idx_api_usage_workspace').on(table.workspaceId),
+    index('idx_api_usage_provider').on(table.provider),
+    index('idx_api_usage_created').on(table.createdAt),
+  ]
+);
+
+// ============================================================
+// voc_insights — Voice-of-Customer aggregated reply patterns (Phase 5)
+// ============================================================
+export const vocInsights = pgTable(
+  'voc_insights',
+  {
+    id: varchar('id').primaryKey().notNull(),
+    workspaceId: varchar('workspace_id').references(() => workspaces.id),
+    insightType: varchar('insight_type').notNull(), // objection | interest | question | trend
+    content: text('content').notNull(),
+    frequency: integer('frequency').notNull().default(1),
+    exampleReplies: jsonb('example_replies'),
+    lastSeenAt: timestamp('last_seen_at').defaultNow(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [index('idx_voc_type').on(table.insightType)]
+);
+
+// ============================================================
 // knowledge_base — RAG store of successful outreach exchanges (Phase 4)
 // ============================================================
 export const knowledgeBase = pgTable(
@@ -614,3 +656,9 @@ export type AppConfigEntry = typeof appConfig.$inferSelect;
 
 export type KnowledgeEntry = typeof knowledgeBase.$inferSelect;
 export type InsertKnowledgeEntry = typeof knowledgeBase.$inferInsert;
+
+export type ApiUsageLogEntry = typeof apiUsageLog.$inferSelect;
+export type InsertApiUsageLogEntry = typeof apiUsageLog.$inferInsert;
+
+export type VocInsight = typeof vocInsights.$inferSelect;
+export type InsertVocInsight = typeof vocInsights.$inferInsert;

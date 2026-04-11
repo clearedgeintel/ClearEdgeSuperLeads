@@ -12,6 +12,7 @@ import Inbox from "@/components/Inbox";
 import ProfileManagement from "@/components/ProfileManagement";
 import EmailOutreach from "@/components/EmailOutreach";
 import Analytics from "@/components/Analytics";
+import Reports from "@/components/Reports";
 
 export default function Dashboard() {
   const { user, isLoading } = useAuth();
@@ -73,7 +74,8 @@ export default function Dashboard() {
     { id: 'inbox', label: 'Inbox', icon: 'inbox' },
     { id: 'profileManagement', label: 'GBP Profiles', icon: 'store' },
     { id: 'emailOutreach', label: 'Email Outreach', icon: 'envelope' },
-    { id: 'analytics', label: 'Analytics', icon: 'chart-bar' }
+    { id: 'analytics', label: 'Analytics', icon: 'chart-bar' },
+    { id: 'reports', label: 'Reports', icon: 'chart-line' }
   ];
 
   const getInitials = (firstName?: string, lastName?: string) => {
@@ -165,6 +167,7 @@ export default function Dashboard() {
           {activeTab === 'profileManagement' && <ProfileManagement />}
           {activeTab === 'emailOutreach' && <EmailOutreach />}
           {activeTab === 'analytics' && <Analytics />}
+          {activeTab === 'reports' && <Reports />}
         </main>
       </div>
     </div>

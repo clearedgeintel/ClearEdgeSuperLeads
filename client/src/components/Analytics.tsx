@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, Users, Mail, DollarSign, BarChart } from "lucide-react";
+import type React from "react";
+import { TrendingUp, Users, Mail, BarChart, Linkedin, MessageSquare, Calendar, UserPlus } from "lucide-react";
 
 interface AnalyticsSummary {
   totalLeads: number;
@@ -12,10 +13,32 @@ interface AnalyticsSummary {
   totalReplied: number;
 }
 
+interface AnalyticsOverview {
+  periodDays: number;
+  totalLeads: number;
+  activeCampaigns: number;
+  messagesSentTotal: number;
+  messagesSentPeriod: number;
+  connectionRequestsSent: number;
+  connectionsAccepted: number;
+  connectionRate: string;
+  messagesSent: number;
+  repliesReceived: number;
+  replyRate: string;
+  positiveReplies: number;
+  positiveRate: string;
+  meetingsBooked: number;
+}
+
 export default function Analytics() {
   const { data: summary, isLoading } = useQuery<AnalyticsSummary>({
     queryKey: ['/api/analytics/summary'],
   });
+
+  const { data: overviewData } = useQuery<{ success: boolean; data: AnalyticsOverview }>({
+    queryKey: ['/api/analytics/overview'],
+  });
+  const overview = overviewData?.data;
 
   if (isLoading) {
     return (
@@ -57,11 +80,60 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
+      {/* Cross-channel LinkedIn pipeline — Phase 5 overview endpoint */}
+      {overview && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Linkedin className="h-5 w-5 text-sky-600" />
+              <span>LinkedIn Pipeline ({overview.periodDays}d)</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <PipelineStat
+                icon={<UserPlus className="h-4 w-4 text-sky-600" />}
+                label="Connections sent"
+                value={overview.connectionRequestsSent}
+              />
+              <PipelineStat
+                icon={<Users className="h-4 w-4 text-sky-600" />}
+                label="Accepted"
+                value={overview.connectionsAccepted}
+                sublabel={`${overview.connectionRate}% rate`}
+              />
+              <PipelineStat
+                icon={<MessageSquare className="h-4 w-4 text-blue-600" />}
+                label="Messages sent"
+                value={overview.messagesSent}
+              />
+              <PipelineStat
+                icon={<MessageSquare className="h-4 w-4 text-blue-600" />}
+                label="Replies"
+                value={overview.repliesReceived}
+                sublabel={`${overview.replyRate}% rate`}
+              />
+              <PipelineStat
+                icon={<MessageSquare className="h-4 w-4 text-green-600" />}
+                label="Positive"
+                value={overview.positiveReplies}
+                sublabel={`${overview.positiveRate}% rate`}
+              />
+              <PipelineStat
+                icon={<Calendar className="h-4 w-4 text-purple-600" />}
+                label="Meetings"
+                value={overview.meetingsBooked}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <BarChart className="h-5 w-5" />
-            <span>Performance Analytics</span>
+            <span>Email Pipeline (GBP)</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -221,6 +293,29 @@ export default function Analytics() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function PipelineStat({
+  icon,
+  label,
+  value,
+  sublabel,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  sublabel?: string;
+}) {
+  return (
+    <div className="border rounded-lg p-3">
+      <div className="flex items-center gap-2 mb-1">
+        {icon}
+        <div className="text-xs text-gray-600">{label}</div>
+      </div>
+      <div className="text-xl font-bold text-gray-900">{value}</div>
+      {sublabel && <div className="text-xs text-gray-500 mt-1">{sublabel}</div>}
     </div>
   );
 }

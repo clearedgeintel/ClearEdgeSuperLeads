@@ -1,10 +1,10 @@
-// API usage / cost tracker. Logs Claude and Unipile calls so Phase 5's
-// analytics dashboards can show per-workspace token spend.
-//
-// The reference implementation wrote to a Supabase `api_usage_log` table.
-// That table isn't in the unified schema yet — Phase 5 will add it when
-// analytics needs to query it. Until then this is a console-only shim,
-// which still gives dev visibility without blocking Phase 3 progress.
+// API usage tracker — logs Claude/Unipile/Places/HubSpot calls to the
+// `api_usage_log` table so Phase 5 analytics can compute per-workspace
+// cost dashboards and per-campaign token spend. Falls back to a
+// console log if the DB write fails, since tracking must never break
+// the caller.
+
+import { storage } from '../storage';
 
 export type ApiProvider = 'claude' | 'unipile' | 'places' | 'hubspot';
 
@@ -21,9 +21,22 @@ export interface ApiCall {
 
 export async function trackApiCall(call: ApiCall): Promise<void> {
   try {
-    // TODO(phase-5): persist to `api_usage_log` table for cost analytics.
-    console.log('[api]', call);
-  } catch {
-    // Tracking must never break the caller.
+    await storage.createApiUsageLog({
+      workspaceId: call.workspaceId ?? null,
+      provider: call.provider,
+      endpoint: call.endpoint,
+      model: call.model ?? null,
+      inputTokens: call.inputTokens ?? null,
+      outputTokens: call.outputTokens ?? null,
+      campaignId: call.campaignId ?? null,
+      leadId: call.leadId ?? null,
+    });
+  } catch (err) {
+    // Last-ditch fallback — log to console so we don't lose the event
+    // entirely, but never rethrow.
+    console.warn('[apiTracker] DB write failed, falling back to console', {
+      call,
+      err,
+    });
   }
 }
