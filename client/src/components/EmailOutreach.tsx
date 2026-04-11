@@ -20,7 +20,7 @@ interface SentEmail {
   website: string | null;
 }
 
-export default function Outreach() {
+export default function EmailOutreach() {
   const [selectedEmail, setSelectedEmail] = useState<SentEmail | null>(null);
 
   const { data: emails = [], isLoading } = useQuery<SentEmail[]>({

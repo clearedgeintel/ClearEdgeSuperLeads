@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { MapPin, LogOut } from "lucide-react";
 import LeadDiscovery from "@/components/LeadDiscovery";
 import ProfileManagement from "@/components/ProfileManagement";
-import Outreach from "@/components/Outreach";
+import EmailOutreach from "@/components/EmailOutreach";
 import Analytics from "@/components/Analytics";
 
 export default function Dashboard() {
@@ -62,9 +62,11 @@ export default function Dashboard() {
   }
 
   const navItems = [
-    { id: 'leadDiscovery', label: 'Lead Discovery', icon: 'search' },
-    { id: 'profileManagement', label: 'Profile Management', icon: 'store' },
-    { id: 'outreach', label: 'Outreach', icon: 'envelope' },
+    { id: 'leadDiscovery', label: 'Google Leads', icon: 'search' },
+    { id: 'linkedinLeads', label: 'LinkedIn Leads', icon: 'linkedin' },
+    { id: 'profileManagement', label: 'GBP Profiles', icon: 'store' },
+    { id: 'emailOutreach', label: 'Email Outreach', icon: 'envelope' },
+    { id: 'sendQueue', label: 'Send Queue', icon: 'list-check' },
     { id: 'analytics', label: 'Analytics', icon: 'chart-bar' }
   ];
 
@@ -150,10 +152,26 @@ export default function Dashboard() {
         {/* Main Content Area */}
         <main className="flex-1 p-6">
           {activeTab === 'leadDiscovery' && <LeadDiscovery />}
+          {activeTab === 'linkedinLeads' && <PhasePlaceholder phase={3} title="LinkedIn Leads" description="Search LinkedIn via Unipile, save prospects, and enroll them into multi-step campaigns." />}
           {activeTab === 'profileManagement' && <ProfileManagement />}
-          {activeTab === 'outreach' && <Outreach />}
+          {activeTab === 'emailOutreach' && <EmailOutreach />}
+          {activeTab === 'sendQueue' && <PhasePlaceholder phase={3} title="Send Queue" description="Review, approve, edit, or skip AI-generated messages before they dispatch." />}
           {activeTab === 'analytics' && <Analytics />}
         </main>
+      </div>
+    </div>
+  );
+}
+
+function PhasePlaceholder({ phase, title, description }: { phase: number; title: string; description: string }) {
+  return (
+    <div className="flex items-center justify-center h-[60vh]">
+      <div className="text-center max-w-md">
+        <div className="inline-block bg-gray-100 text-gray-600 text-xs font-medium px-3 py-1 rounded-full mb-4">
+          Phase {phase}
+        </div>
+        <h2 className="text-2xl font-semibold text-gray-900 mb-2">{title}</h2>
+        <p className="text-gray-600">{description}</p>
       </div>
     </div>
   );

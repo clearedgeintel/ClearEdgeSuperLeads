@@ -40,6 +40,11 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <span>Lead Analysis - {lead.businessName}</span>
+            {lead.leadSource === 'linkedin' ? (
+              <Badge className="bg-sky-100 text-sky-800 text-xs">LinkedIn</Badge>
+            ) : (
+              <Badge className="bg-indigo-100 text-indigo-800 text-xs">Google</Badge>
+            )}
             {lead.businessStatus === 'OPERATIONAL' && (
               <Badge className="bg-green-100 text-green-800 text-xs">Open</Badge>
             )}

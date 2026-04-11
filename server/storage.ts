@@ -33,23 +33,28 @@ export interface IStorage {
 
   // Lead operations
   createLead(lead: InsertLead): Promise<Lead>;
-  getLeads(userId: string, filters?: { priority?: string; status?: string }): Promise<Lead[]>;
+  getLeads(
+    userId: string,
+    workspaceId?: string | null,
+    filters?: { priority?: string; status?: string }
+  ): Promise<Lead[]>;
   getLead(id: string): Promise<Lead | undefined>;
   updateLead(id: string, updates: Partial<Lead>): Promise<Lead>;
   updateLeadAiAnalysis(id: string, score: number, analysis: any): Promise<void>;
 
   // GBP Profile operations
   createGbpProfile(profile: InsertGbpProfile): Promise<GbpProfile>;
-  getGbpProfiles(userId: string): Promise<GbpProfile[]>;
+  getGbpProfiles(userId: string, workspaceId?: string | null): Promise<GbpProfile[]>;
   getGbpProfile(id: string): Promise<GbpProfile | undefined>;
   updateGbpProfile(id: string, updates: Partial<GbpProfile>): Promise<GbpProfile>;
   syncGbpProfile(locationId: string, profileData: any): Promise<void>;
 
   // Outreach operations
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
-  getCampaigns(userId: string): Promise<Campaign[]>;
+  getCampaigns(userId: string, workspaceId?: string | null): Promise<Campaign[]>;
   createOutreachEmail(email: InsertOutreachEmail): Promise<OutreachEmail>;
   getOutreachEmails(campaignId?: string): Promise<OutreachEmail[]>;
+  getOutreachEmailsByUser(userId: string, workspaceId?: string | null): Promise<OutreachEmail[]>;
   updateOutreachEmailStatus(id: string, status: string, timestamp?: Date): Promise<void>;
 }
 
@@ -132,9 +137,16 @@ export class DatabaseStorage implements IStorage {
     return lead;
   }
 
-  async getLeads(userId: string, filters?: { priority?: string; status?: string }): Promise<Lead[]> {
-    let conditions = [eq(leads.createdBy, userId)];
-    
+  async getLeads(
+    userId: string,
+    workspaceId?: string | null,
+    filters?: { priority?: string; status?: string }
+  ): Promise<Lead[]> {
+    const conditions = [eq(leads.createdBy, userId)];
+
+    if (workspaceId) {
+      conditions.push(eq(leads.workspaceId, workspaceId));
+    }
     if (filters?.priority) {
       conditions.push(eq(leads.priority, filters.priority));
     }
@@ -182,8 +194,10 @@ export class DatabaseStorage implements IStorage {
     return profile;
   }
 
-  async getGbpProfiles(userId: string): Promise<GbpProfile[]> {
-    return await db.select().from(gbpProfiles).where(eq(gbpProfiles.managedBy, userId));
+  async getGbpProfiles(userId: string, workspaceId?: string | null): Promise<GbpProfile[]> {
+    const conditions = [eq(gbpProfiles.managedBy, userId)];
+    if (workspaceId) conditions.push(eq(gbpProfiles.workspaceId, workspaceId));
+    return await db.select().from(gbpProfiles).where(and(...conditions));
   }
 
   async getGbpProfile(id: string): Promise<GbpProfile | undefined> {
@@ -223,8 +237,10 @@ export class DatabaseStorage implements IStorage {
     return campaign;
   }
 
-  async getCampaigns(userId: string): Promise<Campaign[]> {
-    return await db.select().from(campaigns).where(eq(campaigns.createdBy, userId));
+  async getCampaigns(userId: string, workspaceId?: string | null): Promise<Campaign[]> {
+    const conditions = [eq(campaigns.createdBy, userId)];
+    if (workspaceId) conditions.push(eq(campaigns.workspaceId, workspaceId));
+    return await db.select().from(campaigns).where(and(...conditions));
   }
 
   async createOutreachEmail(emailData: InsertOutreachEmail): Promise<OutreachEmail> {
@@ -249,7 +265,10 @@ export class DatabaseStorage implements IStorage {
    * Returns all outreach emails sent by a user, joined with lead info
    * (business name, website) so the UI doesn't need a second query.
    */
-  async getOutreachEmailsByUser(userId: string): Promise<any[]> {
+  async getOutreachEmailsByUser(userId: string, workspaceId?: string | null): Promise<any[]> {
+    const conditions = [eq(outreachEmails.createdBy, userId)];
+    if (workspaceId) conditions.push(eq(outreachEmails.workspaceId, workspaceId));
+
     const rows = await db
       .select({
         id: outreachEmails.id,
@@ -267,7 +286,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(outreachEmails)
       .leftJoin(leads, eq(outreachEmails.leadId, leads.id))
-      .where(eq(outreachEmails.createdBy, userId))
+      .where(and(...conditions))
       .orderBy(desc(outreachEmails.sentAt));
 
     return rows;

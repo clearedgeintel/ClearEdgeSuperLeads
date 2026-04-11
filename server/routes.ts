@@ -10,7 +10,7 @@ import { aiService } from "./services/aiService";
 import { emailService } from "./services/email";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
-import { hubspotService, extractDomain, parseAddress } from "./services/hubspot";
+import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 
 import { nanoid } from "nanoid";
@@ -253,8 +253,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           searchQuery: `${query} ${location || ''}`.trim(),
           status: 'discovered',
           priority: 'medium',
+          leadSource: 'google',
           enrichedAt: new Date(),
           createdBy: user.id,
+          workspaceId: user.workspaceId,
         });
 
         leads.push(lead);
@@ -274,7 +276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/leads/reanalyze-stuck', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
-      const allLeads = await storage.getLeads(user.id);
+      const allLeads = await storage.getLeads(user.id, user.workspaceId);
       const stuck = allLeads.filter(l => l.aiScore == null);
 
       for (const lead of stuck) {
@@ -383,7 +385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.session.user!;
       const { priority, status } = req.query;
 
-      const leads = await storage.getLeads(user.id, {
+      const leads = await storage.getLeads(user.id, user.workspaceId, {
         priority: priority as string,
         status: status as string
       });
@@ -425,7 +427,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/gbp-profiles', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
-      const profiles = await storage.getGbpProfiles(user.id);
+      const profiles = await storage.getGbpProfiles(user.id, user.workspaceId);
       res.json(profiles);
     } catch (error: any) {
       console.error('Get GBP profiles error:', error);
@@ -436,7 +438,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/gbp-profile/:locationId', requireAuth, async (req, res) => {
     try {
       const { locationId } = req.params;
-      const profiles = await storage.getGbpProfiles(req.session.user!.id);
+      const user = req.session.user!;
+      const profiles = await storage.getGbpProfiles(user.id, user.workspaceId);
       const profile = profiles.find(p => p.locationId === locationId);
 
       if (!profile) {
@@ -454,8 +457,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { locationId } = req.params;
       const updates = req.body;
-      
-      const profiles = await storage.getGbpProfiles(req.session.user!.id);
+
+      const user = req.session.user!;
+      const profiles = await storage.getGbpProfiles(user.id, user.workspaceId);
       const profile = profiles.find(p => p.locationId === locationId);
 
       if (!profile) {
@@ -540,6 +544,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: 'sent',
         emailProvider: 'gmail',
         createdBy: user.id,
+        workspaceId: user.workspaceId,
       });
 
       // Update lead status
@@ -562,7 +567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/outreach/sent', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
-      const emails = await storage.getOutreachEmailsByUser(user.id);
+      const emails = await storage.getOutreachEmailsByUser(user.id, user.workspaceId);
       res.json(emails);
     } catch (error: any) {
       console.error('Get sent emails error:', error);
@@ -573,7 +578,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/outreach-campaigns', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
-      const campaigns = await storage.getCampaigns(user.id);
+      const campaigns = await storage.getCampaigns(user.id, user.workspaceId);
       res.json(campaigns);
     } catch (error: any) {
       console.error('Get outreach campaigns error:', error);
@@ -585,10 +590,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/analytics/summary', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
-      
+
       const [leads, campaigns] = await Promise.all([
-        storage.getLeads(user.id),
-        storage.getCampaigns(user.id)
+        storage.getLeads(user.id, user.workspaceId),
+        storage.getCampaigns(user.id, user.workspaceId)
       ]);
 
       const summary = {

@@ -236,38 +236,42 @@ Create `shared/schema.ts` with all table definitions:
 
 ### 2.1 Backend services
 
-- [ ] Port `server/services/placesApi.ts` — no changes needed
-- [ ] Port `server/services/emailDiscovery.ts` — no changes needed
-- [ ] Port `server/services/email.ts` — keep for dev/local use only, replaced Phase 8
-- [ ] Port `server/services/googleAuth.ts` — no changes needed
-- [ ] Port `server/services/hubspot.ts` → `server/services/hubspotService.ts` (shared by both channels)
-- [ ] Port `server/lib/backgroundQueue.ts` — no changes needed
-- [ ] Update `server/storage.ts` — all queries scoped by `workspace_id`
+- [x] `server/services/placesApi.ts` — already in place from GBP base, no changes needed
+- [x] `server/services/emailDiscovery.ts` — already in place, no changes needed
+- [x] `server/services/email.ts` — already in place; kept for dev/local use only, replaced Phase 8
+- [x] `server/services/googleAuth.ts` — already in place, no changes needed
+- [x] Rename `server/services/hubspot.ts` → [server/services/hubspotService.ts](server/services/hubspotService.ts); updated import in [server/routes.ts](server/routes.ts)
+- [x] `server/lib/backgroundQueue.ts` — already in place, no changes needed
+- [x] Update [server/storage.ts](server/storage.ts) — `getLeads`, `getGbpProfiles`, `getCampaigns`, and `getOutreachEmailsByUser` all accept an optional `workspaceId` that adds an additional `WHERE` clause alongside `createdBy`/`managedBy`. Inserts carry `workspaceId` through from `req.session.user.workspaceId`. Phase 9 promotes this to a hard requirement.
 
 ### 2.2 Frontend components
 
-- [ ] Port `client/src/components/LeadDiscovery.tsx` — update for unified schema
-- [ ] Port `client/src/components/LeadModal.tsx` — add `lead_source` badge ('Google' | 'LinkedIn')
-- [ ] Port `client/src/components/ProfileManagement.tsx` — no changes needed
-- [ ] Port `client/src/components/ProfileModal.tsx` — no changes needed
-- [ ] Port `client/src/components/Outreach.tsx` → `EmailOutreach.tsx`, scope to email channel
-- [ ] Port `client/src/components/OutreachPreviewModal.tsx` — no changes needed
-- [ ] Port `client/src/pages/Dashboard.tsx` — expand to 6 tabs (add LinkedIn, Queue)
-- [ ] Port `client/src/pages/Login.tsx` — no changes needed
+- [x] [client/src/components/LeadDiscovery.tsx](client/src/components/LeadDiscovery.tsx) — already in place from GBP base; new unified-schema columns are additive, no changes needed
+- [x] [client/src/components/LeadModal.tsx](client/src/components/LeadModal.tsx) — added a `leadSource` badge pill (blue = Google, sky = LinkedIn) next to the business-status badges in the dialog header
+- [x] [client/src/components/ProfileManagement.tsx](client/src/components/ProfileManagement.tsx) — already in place, no changes needed
+- [x] [client/src/components/ProfileModal.tsx](client/src/components/ProfileModal.tsx) — already in place, no changes needed
+- [x] Rename [client/src/components/Outreach.tsx](client/src/components/EmailOutreach.tsx) → `EmailOutreach.tsx` (exported function renamed too) + updated import in [client/src/pages/Dashboard.tsx](client/src/pages/Dashboard.tsx)
+- [x] [client/src/components/OutreachPreviewModal.tsx](client/src/components/OutreachPreviewModal.tsx) — already in place, no changes needed
+- [x] [client/src/pages/Dashboard.tsx](client/src/pages/Dashboard.tsx) — expanded from 4 to 6 tabs: Google Leads, LinkedIn Leads (Phase 3 placeholder), GBP Profiles, Email Outreach, Send Queue (Phase 3 placeholder), Analytics. Placeholders use an inline `PhasePlaceholder` component.
+- [x] [client/src/pages/Login.tsx](client/src/pages/Login.tsx) — already in place, no changes needed
 
 ### 2.3 API routes (GBP)
 
-- [ ] `GET /api/auth/google` + callback
-- [ ] `GET /api/auth/me` + `POST /api/auth/logout`
-- [ ] `POST /api/leads/search` — Google Custom Search
-- [ ] `POST /api/leads/:id/enrich` — Places API enrichment
-- [ ] `POST /api/leads/:id/score` — Claude AI analysis
-- [ ] `POST /api/leads/:id/email` — generate + send outreach email
-- [ ] `GET/POST/PATCH /api/leads` — CRUD (workspace-scoped)
-- [ ] `GET/POST/PATCH/DELETE /api/profiles` — GBP profile management
-- [ ] `GET/POST /api/campaigns` — email campaigns
-- [ ] `POST /api/leads/:id/hubspot` — push to HubSpot
-- [ ] `GET /api/analytics` — pipeline metrics
+All routes from the GBP base are already mounted in [server/routes.ts](server/routes.ts). Workspace scoping landed in §2.1. No structural changes required for Phase 2 — the existing routes work against the new schema because Phase 1.2 only *added* columns (never removed). Deferred to Phase 6's final-pass audit: Zod validation on every endpoint, explicit `requireAuth` audit, and rate-limit wiring.
+
+- [x] `GET /api/auth/google` + callback — already in routes.ts
+- [x] `GET /api/auth/user` + `POST /api/auth/logout` — already in fallbackAuth.ts (note: roadmap originally specified `/api/auth/me`; kept existing `/api/auth/user` to avoid breaking the frontend `useAuth` hook — rename deferred if ever needed)
+- [x] `POST /api/search-leads` — Google Custom Search (existing route name)
+- [x] `POST /api/leads/:id/enrich` — Places API enrichment
+- [x] `POST /api/leads/:id/score` — Claude AI analysis
+- [x] `POST /api/leads/:id/send-outreach` — generate + send outreach email
+- [x] `GET/POST/PATCH /api/leads` — CRUD (now workspace-scoped)
+- [x] `GET/POST /api/gbp-profiles` — GBP profile management
+- [x] `GET/POST /api/outreach-campaigns` — email campaigns
+- [x] `POST /api/leads/:id/push-to-hubspot` — push to HubSpot
+- [x] `GET /api/analytics/summary` — pipeline metrics
+
+> **Phase 2 status:** Complete as of 2026-04-11. Backend services workspace-scoped, file renames landed (hubspot → hubspotService, Outreach → EmailOutreach), LeadModal shows the lead-source badge, Dashboard has all 6 tabs. Check ✓, lint ✓ (0 errors, 110 warnings — one less than Phase 1.3 thanks to a `let conditions` → `const conditions` rewrite in `getLeads`), build ✓.
 
 ---
 
