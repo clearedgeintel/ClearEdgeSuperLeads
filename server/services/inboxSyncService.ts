@@ -11,6 +11,8 @@
 import { storage } from '../storage';
 import { withRetry } from '../lib/retry';
 import { classifyReply, type ReplySentiment } from './replyClassifier';
+import { recordReplyForVersion } from './promptEngine';
+import { storeConversation } from './ragEngine';
 import type { Lead } from '@shared/schema';
 
 export interface InboxSyncResult {
@@ -130,11 +132,36 @@ export class InboxSyncService {
         await storage.updateEnrollment(enrollment.id, { status: 'paused' });
       }
 
-      // Phase 4: recordReplyForVersion + storeConversation (RAG) against
-      // the last sent queue item for this lead. Deferred because both
-      // live inside promptEngine/ragEngine which the roadmap consolidates
-      // in the AI Engine Consolidation pass.
-      // const lastQueueItem = await storage.getLastSentQueueItemForLead(lead.id);
+      // Phase 4: credit the reply to the prompt variant that generated
+      // the outbound message, and store the successful conversation in
+      // the RAG knowledge base for future message generation.
+      const lastQueueItem = await storage.getLastSentQueueItemForLead(lead.id);
+      if (lastQueueItem) {
+        await recordReplyForVersion(lastQueueItem.id, sentiment === 'positive');
+
+        if (sentiment === 'positive') {
+          const outbound = lastQueueItem.editedDraft ?? lastQueueItem.aiDraft;
+          if (outbound) {
+            const step = lastQueueItem.campaignStepId
+              ? await storage.getCampaignStep(lastQueueItem.campaignStepId)
+              : null;
+            try {
+              await storeConversation({
+                workspaceId: lead.workspaceId ?? null,
+                leadId: lead.id,
+                campaignId: step?.campaignId ?? null,
+                outboundMessage: outbound,
+                replyMessage: messageText,
+                sentiment,
+                industry: lead.industry,
+                titlePattern: lead.title,
+              });
+            } catch (err) {
+              console.warn('[inboxSync] storeConversation failed', err);
+            }
+          }
+        }
+      }
 
       replies++;
     }

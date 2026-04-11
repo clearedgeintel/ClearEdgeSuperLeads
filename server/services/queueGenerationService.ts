@@ -9,7 +9,7 @@
 
 import { storage } from '../storage';
 import { aiService } from './aiService';
-import { buildPrompt } from './promptEngine';
+import { buildEnhancedPrompt, selectPromptVersion } from './promptEngine';
 import { trackApiCall } from '../lib/apiTracker';
 import type { Campaign, Lead, CampaignStep, CampaignEnrollment, SendQueueItem } from '@shared/schema';
 
@@ -160,7 +160,22 @@ export class QueueGenerationService {
     const tone = campaign.tone ?? 'consultative';
     const requireApproval = campaign.requireApproval !== false;
 
-    const prompt = buildPrompt({ template: step.promptTemplate, lead, tone });
+    // Phase 4: A/B prompt version selection. Falls back to the step's
+    // own prompt_template when no variants exist for this (campaign, step)
+    // pair. Returns the versionId so we can stamp it on the queue item
+    // and credit replies to the variant later.
+    const { prompt: template, versionId } = await selectPromptVersion(
+      campaign.id,
+      step.stepOrder,
+      step.promptTemplate
+    );
+
+    const prompt = await buildEnhancedPrompt({
+      template,
+      lead,
+      tone,
+      workspaceId: campaign.workspaceId,
+    });
 
     const { text, inputTokens, outputTokens } = await aiService.generateLinkedInMessage(prompt);
 
@@ -184,6 +199,7 @@ export class QueueGenerationService {
       enrollmentId: enrollment.id,
       leadId: lead.id,
       campaignStepId: step.id,
+      promptVersionId: versionId,
       channel: campaign.outreachChannel === 'email' ? 'email' : 'linkedin',
       aiDraft: text,
       status,

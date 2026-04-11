@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -21,7 +21,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Megaphone, Plus, Trash2, Play, Pause, X } from "lucide-react";
+import { Megaphone, Plus, Trash2, Play, Pause, X, FlaskConical } from "lucide-react";
 
 interface Campaign {
   id: string;
@@ -263,8 +263,9 @@ function CampaignDetailPanel({
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
         <StepsEditor campaignId={detail.id} steps={detail.steps} onChange={onRefresh} />
+        <PromptVersionsPanel campaignId={detail.id} steps={detail.steps} />
       </CardContent>
     </Card>
   );
@@ -525,5 +526,195 @@ function CampaignWizard({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------- Prompt versions A/B panel (Phase 4) ----------
+
+interface PromptVersionWithRates {
+  id: string;
+  campaignId: string;
+  stepOrder: number;
+  variant: string;
+  promptTemplate: string;
+  description: string | null;
+  timesUsed: number | null;
+  replyCount: number | null;
+  positiveReplyCount: number | null;
+  replyRate: number;
+  positiveRate: number;
+}
+
+function PromptVersionsPanel({
+  campaignId,
+  steps,
+}: {
+  campaignId: string;
+  steps: CampaignStep[];
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [variant, setVariant] = useState("B");
+  const [stepOrder, setStepOrder] = useState<number>(steps[0]?.stepOrder ?? 0);
+  const [promptTemplate, setPromptTemplate] = useState("");
+  const [description, setDescription] = useState("");
+
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data } = useQuery<{ success: boolean; data: PromptVersionWithRates[] }>({
+    queryKey: ["/api/prompt-versions", campaignId],
+    queryFn: async () => {
+      const res = await fetch(`/api/prompt-versions?campaignId=${campaignId}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      return res.json();
+    },
+  });
+  const versions = data?.data ?? [];
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/prompt-versions", {
+        campaignId,
+        stepOrder,
+        variant,
+        promptTemplate,
+        description,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/prompt-versions", campaignId] });
+      setShowForm(false);
+      setPromptTemplate("");
+      setDescription("");
+      setVariant("B");
+      toast({ title: "Variant added" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Create failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const variantsByStep = useMemo(() => {
+    const map = new Map<number, PromptVersionWithRates[]>();
+    for (const v of versions) {
+      const bucket = map.get(v.stepOrder) ?? [];
+      bucket.push(v);
+      map.set(v.stepOrder, bucket);
+    }
+    return map;
+  }, [versions]);
+
+  return (
+    <div className="space-y-3 pt-4 border-t">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+          <FlaskConical className="h-4 w-4 text-amber-600" />
+          A/B Prompt Variants
+        </h3>
+        {!showForm && steps.length > 0 && (
+          <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>
+            <Plus className="h-4 w-4 mr-1" /> New variant
+          </Button>
+        )}
+      </div>
+
+      {versions.length === 0 && !showForm && (
+        <p className="text-sm text-gray-500">
+          No A/B variants yet. The queue generator will use the step's default prompt template.
+          Add a variant to split-test alternate copy.
+        </p>
+      )}
+
+      {steps.map((step) => {
+        const bucket = variantsByStep.get(step.stepOrder) ?? [];
+        if (bucket.length === 0) return null;
+        return (
+          <div key={step.id} className="border rounded-lg p-3">
+            <div className="text-xs font-medium text-gray-500 mb-2">
+              Step {step.stepOrder + 1} · {step.stepType}
+            </div>
+            <div className="space-y-2">
+              {bucket.map((v) => (
+                <div key={v.id} className="flex items-start gap-3">
+                  <Badge className="bg-amber-100 text-amber-800 text-xs">Variant {v.variant}</Badge>
+                  <div className="flex-1 min-w-0">
+                    {v.description && (
+                      <div className="text-xs text-gray-500 mb-1">{v.description}</div>
+                    )}
+                    <p className="text-sm text-gray-700 line-clamp-2">{v.promptTemplate}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                      <span>Sent {v.timesUsed ?? 0}</span>
+                      <span>·</span>
+                      <span>Reply rate {v.replyRate.toFixed(1)}%</span>
+                      <span>·</span>
+                      <span>Positive {v.positiveRate.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {showForm && (
+        <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-gray-600">Step</label>
+              <Select
+                value={String(stepOrder)}
+                onValueChange={(v) => setStepOrder(parseInt(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {steps.map((s) => (
+                    <SelectItem key={s.id} value={String(s.stepOrder)}>
+                      Step {s.stepOrder + 1} · {s.stepType}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600">Variant label</label>
+              <Input
+                value={variant}
+                onChange={(e) => setVariant(e.target.value)}
+                placeholder="A, B, control, etc."
+              />
+            </div>
+          </div>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Short description (e.g. 'question-first opener')"
+          />
+          <Textarea
+            value={promptTemplate}
+            onChange={(e) => setPromptTemplate(e.target.value)}
+            rows={5}
+            placeholder="Variant prompt template — same {{full_name}} / {{title}} / {{company}} / {{industry}} / {{headline}} / {{tone}} variables as the step template"
+          />
+          <div className="flex items-center gap-2 justify-end">
+            <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => createMutation.mutate()}
+              disabled={!variant || !promptTemplate || createMutation.isPending}
+            >
+              Add variant
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

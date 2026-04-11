@@ -343,22 +343,31 @@ Replaces the original `n8n/linkedin-queue-workflow.json` with an in-process back
 
 ### 4.1 Core AI engine
 
-- [ ] Port `lib/prompt-engine.js` → `server/services/promptEngine.ts`
-  - `selectPromptVersion()`, `recordReplyForVersion()`, `interpolatePrompt()`, `buildEnhancedPrompt()`
-- [ ] Port `lib/rag-engine.js` → `server/services/ragEngine.ts`
-- [ ] Port `lib/language-detect.js` → `server/lib/languageDetect.ts`
+- [x] Port `lib/prompt-engine.js` → [server/services/promptEngine.ts](server/services/promptEngine.ts) — `selectPromptVersion()` (weighted A/B selection biased toward under-used variants), `recordReplyForVersion()`, `interpolatePrompt()`, `buildEnhancedPrompt()` (RAG + calendar link + language instruction, all with silent fallback on error).
+- [x] Port `lib/rag-engine.js` → [server/services/ragEngine.ts](server/services/ragEngine.ts) — `storeConversation`, `retrieveSimilar`, `formatRagContext`. Backed by new `knowledge_base` table; `retrieveKnowledge` falls back from industry-matched to global positive examples when no industry hit exists.
+- [x] Port `lib/language-detect.js` → [server/lib/languageDetect.ts](server/lib/languageDetect.ts) — `detectLanguage` (heuristic match on `lead.headline` since unified schema doesn't have a separate `location` column) + `getLocalizationInstruction` for prompt-prefixing.
+- [x] Added `knowledge_base` table to [shared/schema.ts](shared/schema.ts) with `workspace_id`, `lead_id`, `campaign_id`, `outbound_message`, `reply_message`, `sentiment`, `industry`, `title_pattern`, `embedding_text`. `voc_insights` deferred to Phase 5 when `optimization.js` is ported.
 
 ### 4.2 Upgrade AI service
 
-- [ ] Add `generateLinkedInMessage(lead, step, tone)` using `buildEnhancedPrompt()`
-- [ ] Upgrade `generateEmail(lead)` to use prompt engine (A/B for email templates)
-- [ ] Add `trackApiUsage(call)` — calls `apiTracker.ts`
-- [ ] Verify `withRetry()` on all Claude API calls
+- [x] Phase 3's existing [aiService.generateLinkedInMessage(prompt)](server/services/aiService.ts) stays as-is (pure text→text); [queueGenerationService.ts](server/services/queueGenerationService.ts) now builds the enhanced prompt via `selectPromptVersion` + `buildEnhancedPrompt` and stamps `prompt_version_id` on every `send_queue` row. The roadmap's originally-proposed `generateLinkedInMessage(lead, step, tone)` signature would have bled service concerns into the AI layer — splitting it keeps aiService trivially unit-testable.
+- [ ] Upgrade `generateEmail(lead)` to use prompt engine (A/B for email templates) — deferred to Phase 5 when email pipeline gets its own touch (low urgency; email templates don't use A/B yet).
+- [x] `trackApiUsage(call)` — every Claude call in [queueGenerationService.ts](server/services/queueGenerationService.ts) and [replyClassifier.ts](server/services/replyClassifier.ts) invokes `apiTracker.trackApiCall` with provider, model, and token counts. Console shim for now; Phase 5 adds the `api_usage_log` table.
+- [x] Verified `withRetry()` on all Claude API calls: aiService has its own inline `withRetry`, replyClassifier + queueGenerationService wrap via lib/retry.ts.
 
 ### 4.3 Prompt version management
 
-- [ ] `GET/POST/PATCH /api/prompt-versions` routes
-- [ ] PromptVersions panel in CampaignBuilder.tsx with reply rate per variant
+- [x] `GET /api/prompt-versions?campaignId=&stepOrder=` — returns versions with computed `replyRate` and `positiveRate` percentages
+- [x] `POST /api/prompt-versions` — creates a new variant for a (campaign, stepOrder) pair
+- [x] `PATCH /api/prompt-versions/:id` — edit an existing variant
+- [x] PromptVersionsPanel inside [CampaignBuilder.tsx](client/src/components/CampaignBuilder.tsx) — grouped by step, per-variant reply rate + positive rate, inline "New variant" form with step selector, variant label, description, and template textarea.
+
+### 4.4 Service wiring (new — not in original roadmap but required to close the loop)
+
+- [x] [queueGenerationService.generateAndInsert](server/services/queueGenerationService.ts) now calls `selectPromptVersion` before `buildEnhancedPrompt` and stamps `prompt_version_id` on the `send_queue` row so reply credit can flow back to the right variant.
+- [x] [inboxSyncService.sync](server/services/inboxSyncService.ts) now calls `recordReplyForVersion` on every new reply, and `storeConversation` (RAG writeback) on every positive reply — closing the two Phase 4 deferrals from §3F.
+
+> **Phase 4 status:** Complete as of 2026-04-11. Full AI engine consolidation end-to-end: template interpolation → A/B weighted variant selection → RAG context injection → calendar link append → language prefix → Claude call → token-usage tracking → queue insert with variant stamp → reply sentiment classification → variant reply credit → knowledge-base writeback for positive replies. Check ✓, lint ✓ (0 errors, 135 warnings — 4 new from the prompt-version route bodies), build ✓ (dist/index.js 130.6kb, client bundle 427kb).
 
 ---
 

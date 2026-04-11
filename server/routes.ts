@@ -746,6 +746,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Prompt version management (Phase 4 — A/B testing)
+  app.get('/api/prompt-versions', requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.query.campaignId as string | undefined;
+      const stepOrder = req.query.stepOrder !== undefined
+        ? parseInt(req.query.stepOrder as string)
+        : undefined;
+      if (!campaignId) {
+        return res.status(400).json({ success: false, error: 'campaignId query param required' });
+      }
+      const versions = await storage.getPromptVersions(campaignId, stepOrder);
+      const withRates = versions.map((v) => ({
+        ...v,
+        replyRate:
+          v.timesUsed && v.timesUsed > 0
+            ? ((v.replyCount ?? 0) / v.timesUsed) * 100
+            : 0,
+        positiveRate:
+          v.replyCount && v.replyCount > 0
+            ? ((v.positiveReplyCount ?? 0) / v.replyCount) * 100
+            : 0,
+      }));
+      res.json({ success: true, data: withRates });
+    } catch (error: any) {
+      console.error('Get prompt versions error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/prompt-versions', requireAuth, async (req, res) => {
+    try {
+      const { campaignId, stepOrder, variant, promptTemplate, description } = req.body ?? {};
+      if (!campaignId || stepOrder === undefined || !variant || !promptTemplate) {
+        return res.status(400).json({
+          success: false,
+          error: 'campaignId, stepOrder, variant, promptTemplate are required',
+        });
+      }
+      const version = await storage.createPromptVersion({
+        campaignId,
+        stepOrder,
+        variant,
+        promptTemplate,
+        description: description ?? null,
+      });
+      res.json({ success: true, data: version });
+    } catch (error: any) {
+      console.error('Create prompt version error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/prompt-versions/:id', requireAuth, async (req, res) => {
+    try {
+      const updates = req.body ?? {};
+      const version = await storage.updatePromptVersion(req.params.id, updates);
+      res.json({ success: true, data: version });
+    } catch (error: any) {
+      console.error('Update prompt version error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Message generation — single enrollment
   app.post('/api/messages/generate', requireAuth, async (req, res) => {
     try {

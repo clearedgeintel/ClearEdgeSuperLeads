@@ -347,6 +347,31 @@ export const engagementEvents = pgTable(
 );
 
 // ============================================================
+// knowledge_base — RAG store of successful outreach exchanges (Phase 4)
+// ============================================================
+export const knowledgeBase = pgTable(
+  'knowledge_base',
+  {
+    id: varchar('id').primaryKey().notNull(),
+    workspaceId: varchar('workspace_id').references(() => workspaces.id),
+    leadId: varchar('lead_id').references(() => leads.id),
+    campaignId: varchar('campaign_id').references(() => campaigns.id),
+    outboundMessage: text('outbound_message').notNull(),
+    replyMessage: text('reply_message'),
+    sentiment: varchar('sentiment'), // positive | negative | neutral
+    industry: varchar('industry'),
+    titlePattern: varchar('title_pattern'),
+    embeddingText: text('embedding_text'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('idx_kb_sentiment').on(table.sentiment),
+    index('idx_kb_industry').on(table.industry),
+    index('idx_kb_workspace').on(table.workspaceId),
+  ]
+);
+
+// ============================================================
 // outreach_emails — GBP email records + bounce/click tracking
 // ============================================================
 export const outreachEmails = pgTable('outreach_emails', {
@@ -586,3 +611,6 @@ export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type UnipileAccount = typeof unipileAccounts.$inferSelect;
 export type AppConfigEntry = typeof appConfig.$inferSelect;
+
+export type KnowledgeEntry = typeof knowledgeBase.$inferSelect;
+export type InsertKnowledgeEntry = typeof knowledgeBase.$inferInsert;

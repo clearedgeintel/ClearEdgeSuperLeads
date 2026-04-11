@@ -8,6 +8,8 @@ import {
   sendQueue,
   sendLog,
   engagementEvents,
+  promptVersions,
+  knowledgeBase,
   outreachEmails,
   workspaces,
   appConfig,
@@ -27,6 +29,9 @@ import {
   type InsertSendQueueItem,
   type SendLogEntry,
   type EngagementEvent,
+  type PromptVersion,
+  type KnowledgeEntry,
+  type InsertKnowledgeEntry,
   type OutreachEmail,
   type InsertOutreachEmail,
   type Workspace,
@@ -113,6 +118,17 @@ export interface IStorage {
   getEngagementEventsForLead(leadId: string): Promise<EngagementEvent[]>;
   hasEngagementEvent(leadId: string, eventType: string): Promise<boolean>;
   getRecentInboxEvents(workspaceId?: string | null, limit?: number): Promise<Array<EngagementEvent & { lead: Lead | null }>>;
+
+  // Prompt versions (A/B testing)
+  getPromptVersions(campaignId: string, stepOrder?: number): Promise<PromptVersion[]>;
+  createPromptVersion(version: Omit<PromptVersion, 'id' | 'createdAt' | 'timesUsed' | 'replyCount' | 'positiveReplyCount'>): Promise<PromptVersion>;
+  updatePromptVersion(id: string, updates: Partial<PromptVersion>): Promise<PromptVersion>;
+  incrementPromptVersionUsage(id: string): Promise<void>;
+  recordPromptVersionReply(id: string, isPositive: boolean): Promise<void>;
+
+  // RAG knowledge base
+  createKnowledgeEntry(entry: Omit<InsertKnowledgeEntry, 'id'>): Promise<KnowledgeEntry>;
+  retrieveKnowledge(opts: { industry?: string | null; sentiment?: string; limit?: number; workspaceId?: string | null }): Promise<KnowledgeEntry[]>;
 
   // Lead lookups for inbox sync
   getLeadsWithUnipileMemberId(workspaceId?: string | null): Promise<Lead[]>;
@@ -631,6 +647,105 @@ export class DatabaseStorage implements IStorage {
       )
       .limit(1);
     return Boolean(row);
+  }
+
+  // Prompt versions (A/B testing)
+  async getPromptVersions(campaignId: string, stepOrder?: number): Promise<PromptVersion[]> {
+    const conditions = [eq(promptVersions.campaignId, campaignId)];
+    if (stepOrder !== undefined) conditions.push(eq(promptVersions.stepOrder, stepOrder));
+    return await db
+      .select()
+      .from(promptVersions)
+      .where(and(...conditions))
+      .orderBy(asc(promptVersions.stepOrder), asc(promptVersions.variant));
+  }
+
+  async createPromptVersion(
+    versionData: Omit<
+      PromptVersion,
+      'id' | 'createdAt' | 'timesUsed' | 'replyCount' | 'positiveReplyCount'
+    >
+  ): Promise<PromptVersion> {
+    const [row] = await db
+      .insert(promptVersions)
+      .values({ id: nanoid(), ...versionData })
+      .returning();
+    return row;
+  }
+
+  async updatePromptVersion(
+    id: string,
+    updates: Partial<PromptVersion>
+  ): Promise<PromptVersion> {
+    const [row] = await db
+      .update(promptVersions)
+      .set(updates)
+      .where(eq(promptVersions.id, id))
+      .returning();
+    return row;
+  }
+
+  async incrementPromptVersionUsage(id: string): Promise<void> {
+    await db
+      .update(promptVersions)
+      .set({ timesUsed: sql`${promptVersions.timesUsed} + 1` })
+      .where(eq(promptVersions.id, id));
+  }
+
+  async recordPromptVersionReply(id: string, isPositive: boolean): Promise<void> {
+    await db
+      .update(promptVersions)
+      .set({
+        replyCount: sql`${promptVersions.replyCount} + 1`,
+        ...(isPositive
+          ? { positiveReplyCount: sql`${promptVersions.positiveReplyCount} + 1` }
+          : {}),
+      })
+      .where(eq(promptVersions.id, id));
+  }
+
+  // RAG knowledge base
+  async createKnowledgeEntry(
+    entryData: Omit<InsertKnowledgeEntry, 'id'>
+  ): Promise<KnowledgeEntry> {
+    const [row] = await db
+      .insert(knowledgeBase)
+      .values({ id: nanoid(), ...entryData })
+      .returning();
+    return row;
+  }
+
+  async retrieveKnowledge(opts: {
+    industry?: string | null;
+    sentiment?: string;
+    limit?: number;
+    workspaceId?: string | null;
+  }): Promise<KnowledgeEntry[]> {
+    const { industry, sentiment = 'positive', limit = 3, workspaceId } = opts;
+    const conditions = [eq(knowledgeBase.sentiment, sentiment)];
+    if (industry) conditions.push(eq(knowledgeBase.industry, industry));
+    if (workspaceId) conditions.push(eq(knowledgeBase.workspaceId, workspaceId));
+
+    const rows = await db
+      .select()
+      .from(knowledgeBase)
+      .where(and(...conditions))
+      .orderBy(desc(knowledgeBase.createdAt))
+      .limit(limit);
+
+    // Fall back to any positive examples (ignoring industry) if no match
+    if (rows.length === 0 && industry) {
+      const fallbackConditions = [eq(knowledgeBase.sentiment, sentiment)];
+      if (workspaceId) fallbackConditions.push(eq(knowledgeBase.workspaceId, workspaceId));
+      return await db
+        .select()
+        .from(knowledgeBase)
+        .where(and(...fallbackConditions))
+        .orderBy(desc(knowledgeBase.createdAt))
+        .limit(limit);
+    }
+
+    return rows;
   }
 
   async getRecentInboxEvents(
