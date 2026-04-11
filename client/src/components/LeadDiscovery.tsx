@@ -128,6 +128,23 @@ export default function LeadDiscovery() {
     setHubspotFilter('all');
   };
 
+  const bulkVerifyMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/leads/verify-emails');
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      toast({
+        title: 'Bulk verify complete',
+        description: `Verified ${data?.data?.verified ?? 0} lead(s).`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Bulk verify failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
   const searchMutation = useMutation({
     mutationFn: async ({ query, location }: { query: string; location?: string }) => {
       const url = `/api/search-leads?query=${encodeURIComponent(query)}${location ? `&location=${encodeURIComponent(location)}` : ''}`;
@@ -315,6 +332,16 @@ export default function LeadDiscovery() {
                 <Search className="h-4 w-4" />
               )}
               <span>Search Leads</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => bulkVerifyMutation.mutate()}
+              disabled={bulkVerifyMutation.isPending}
+              className="flex items-center space-x-2"
+              title="Run Hunter.io verification on every lead that hasn't been checked yet (up to 50 per call)"
+            >
+              <RefreshCw className={`h-4 w-4 ${bulkVerifyMutation.isPending ? 'animate-spin' : ''}`} />
+              <span>Verify emails</span>
             </Button>
           </div>
         </CardContent>

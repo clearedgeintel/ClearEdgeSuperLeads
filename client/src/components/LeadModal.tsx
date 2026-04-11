@@ -38,6 +38,32 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
     },
   });
 
+  const verifyEmailMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest('POST', `/api/leads/${id}/verify-email`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      const status = data?.data?.status ?? 'unknown';
+      if (status === 'skipped') {
+        toast({
+          title: 'Verification skipped',
+          description: 'HUNTER_API_KEY is not configured on the server.',
+        });
+      } else {
+        toast({
+          title: `Email ${status}`,
+          description: data?.data?.reason ?? '',
+          variant: status === 'undeliverable' ? 'destructive' : 'default',
+        });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Verify failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
   if (!lead) return null;
 
   const getSeverityIcon = (severity: string) => {
@@ -62,7 +88,7 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center space-x-2">
+          <DialogTitle className="flex items-center space-x-2 flex-wrap gap-y-1">
             <span>Lead Analysis - {lead.businessName}</span>
             {lead.leadSource === 'linkedin' ? (
               <Badge className="bg-sky-100 text-sky-800 text-xs">LinkedIn</Badge>
@@ -77,6 +103,16 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
             )}
             {lead.businessStatus === 'CLOSED_PERMANENTLY' && (
               <Badge className="bg-red-100 text-red-800 text-xs">Permanently Closed</Badge>
+            )}
+            {/* Phase 8 — Hunter.io email verification badge */}
+            {lead.emailVerified === 'deliverable' && (
+              <Badge className="bg-green-100 text-green-800 text-xs">Email verified</Badge>
+            )}
+            {lead.emailVerified === 'risky' && (
+              <Badge className="bg-yellow-100 text-yellow-800 text-xs">Email risky</Badge>
+            )}
+            {lead.emailVerified === 'undeliverable' && (
+              <Badge className="bg-red-100 text-red-800 text-xs">Email undeliverable</Badge>
             )}
           </DialogTitle>
         </DialogHeader>
@@ -319,6 +355,17 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
               <Download className="h-4 w-4" />
               <span>Export</span>
             </Button>
+            {lead.email && !lead.emailVerified && (
+              <Button
+                variant="outline"
+                className="flex items-center justify-center space-x-2"
+                onClick={() => verifyEmailMutation.mutate(lead.id)}
+                disabled={verifyEmailMutation.isPending}
+              >
+                <RefreshCw className={`h-4 w-4 ${verifyEmailMutation.isPending ? 'animate-spin' : ''}`} />
+                <span>Verify email</span>
+              </Button>
+            )}
             <Button
               variant="outline"
               className="flex items-center justify-center space-x-2 text-red-600 border-red-200 hover:bg-red-50"

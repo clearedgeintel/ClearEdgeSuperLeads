@@ -40,6 +40,15 @@ export default function Analytics() {
   });
   const overview = overviewData?.data;
 
+  const { data: dailyUsageData } = useQuery<{
+    success: boolean;
+    data: { used: number; cap: number; percent: number };
+  }>({
+    queryKey: ['/api/email/daily-usage'],
+    refetchInterval: 60_000,
+  });
+  const dailyUsage = dailyUsageData?.data;
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -80,6 +89,33 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
+      {/* Phase 8 — today's email usage vs daily warm-up cap */}
+      {dailyUsage && (
+        <div className="flex items-center justify-between bg-white border rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-gray-500" />
+            <span className="text-sm text-gray-600">Email sends today</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-gray-900">
+              {dailyUsage.used} / {dailyUsage.cap}
+            </span>
+            <div className="w-32 bg-gray-200 rounded-full h-2">
+              <div
+                className={`h-2 rounded-full ${
+                  dailyUsage.percent >= 100
+                    ? 'bg-red-500'
+                    : dailyUsage.percent >= 80
+                    ? 'bg-yellow-500'
+                    : 'bg-green-500'
+                }`}
+                style={{ width: `${Math.min(100, dailyUsage.percent)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cross-channel LinkedIn pipeline — Phase 5 overview endpoint */}
       {overview && (
         <Card>

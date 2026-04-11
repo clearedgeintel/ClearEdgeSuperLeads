@@ -193,6 +193,42 @@ export default function Settings() {
       {/* Suppression list (Phase 7 — CAN-SPAM/GDPR compliance) */}
       <SuppressionList />
 
+      {/* Phase 8 — Email warm-up guidance */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Email Warm-Up Checklist</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-600 mb-3">
+            New sending domains need a warm-up period or they'll land in spam folders. Follow
+            this ramp to build a clean sender reputation:
+          </p>
+          <ul className="space-y-2 text-sm">
+            <li className="flex items-start gap-2">
+              <span className="text-gray-500 mt-0.5">•</span>
+              <span><strong>Week 1:</strong> 20 emails/day max. Respond to every reply. Keep bounce rate under 2%.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-gray-500 mt-0.5">•</span>
+              <span><strong>Week 2:</strong> 50/day. Add SPF + DKIM + DMARC DNS records if you haven't.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-gray-500 mt-0.5">•</span>
+              <span><strong>Week 3:</strong> 100/day. Monitor SendGrid reputation dashboard.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-gray-500 mt-0.5">•</span>
+              <span><strong>Week 4+:</strong> 300/day steady state. Expand cautiously if reputation stays healthy.</span>
+            </li>
+          </ul>
+          <p className="text-xs text-gray-500 mt-3">
+            The service enforces your workspace's <code>daily_email_limit</code> — attempts above
+            the cap return a <code>429</code> with <code>code=daily_limit</code>. Adjust the cap
+            via the workspace record as you warm up.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* API usage */}
       {settings?.usage && (
         <Card>

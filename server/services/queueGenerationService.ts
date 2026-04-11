@@ -84,6 +84,14 @@ export class QueueGenerationService {
           continue;
         }
 
+        // Phase 8 — OOO hold. Inbox sync sets ooo_until when an
+        // auto-reply lands; queue generation skips the enrollment
+        // until the hold expires.
+        if (enrollment.oooUntil && new Date(enrollment.oooUntil) > new Date()) {
+          out.skipped++;
+          continue;
+        }
+
         const campaign = await storage.getCampaign(enrollment.campaignId);
         if (!campaign || campaign.status !== 'active') {
           out.skipped++;

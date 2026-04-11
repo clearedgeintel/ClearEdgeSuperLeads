@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -7,7 +7,8 @@ import { storage } from "./storage";
 import { pool } from "./db";
 import { googleAuthService } from "./services/googleAuth";
 import { aiService } from "./services/aiService";
-import { emailService, EmailSuppressedError } from "./services/email";
+import { emailService, EmailSuppressedError, EmailUndeliverableError, EmailDailyLimitError } from "./services/emailService";
+import { verifyEmailWithHunter } from "./services/emailVerification";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
@@ -605,9 +606,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Send email — suppression check + CAN-SPAM footer live inside
-      // the service. Throws EmailSuppressedError if the recipient is
-      // on the workspace's suppression list.
+      // Send email — suppression + undeliverable + CAN-SPAM footer all
+      // live inside the service. Throws EmailSuppressedError on
+      // suppression, EmailUndeliverableError on Hunter-marked bad
+      // addresses.
       let emailResult;
       try {
         emailResult = await emailService.sendOutreachEmail(
@@ -622,6 +624,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             success: false,
             error: err.message,
             code: 'suppressed',
+          });
+        }
+        if (err instanceof EmailUndeliverableError) {
+          return res.status(409).json({
+            success: false,
+            error: err.message,
+            code: 'undeliverable',
+          });
+        }
+        if (err instanceof EmailDailyLimitError) {
+          return res.status(429).json({
+            success: false,
+            error: err.message,
+            code: 'daily_limit',
+            used: err.used,
+            limit: err.limit,
           });
         }
         throw err;
@@ -1160,6 +1178,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Phase 8 — email send counter for the Analytics header.
+  app.get('/api/email/daily-usage', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const workspace = user.workspaceId ? await storage.getWorkspace(user.workspaceId) : null;
+      const cap = workspace?.dailyEmailLimit ?? 20;
+      const midnight = new Date();
+      midnight.setUTCHours(0, 0, 0, 0);
+      const used = await storage.countEmailSendsSince(user.workspaceId ?? null, midnight);
+      res.json({
+        success: true,
+        data: { used, cap, percent: cap > 0 ? Math.round((used / cap) * 100) : 0 },
+      });
+    } catch (error: any) {
+      console.error('Daily usage error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 8 — Hunter.io email verification. Single-lead verify.
+  app.post('/api/leads/:id/verify-email', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const lead = await storage.getLead(req.params.id);
+      if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+      if (!lead.email) {
+        return res.status(400).json({ success: false, error: 'Lead has no email address' });
+      }
+      const result = await verifyEmailWithHunter(lead.email, user.workspaceId);
+      if (result.status !== 'skipped' && result.status !== 'error') {
+        await storage.updateLead(lead.id, {
+          emailVerified: result.status,
+          emailVerifiedAt: new Date(),
+        });
+      }
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Verify email error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Bulk verify — fans out over all leads with an email + no prior verification
+  app.post('/api/leads/verify-emails', aiLimiter, requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const allLeads = await storage.getLeads(user.id, user.workspaceId);
+      const toVerify = allLeads.filter((l) => l.email && !l.emailVerified);
+      const results: Array<{ id: string; status: string }> = [];
+      for (const l of toVerify.slice(0, 50)) {
+        if (!l.email) continue;
+        const result = await verifyEmailWithHunter(l.email, user.workspaceId);
+        if (result.status !== 'skipped' && result.status !== 'error') {
+          await storage.updateLead(l.id, {
+            emailVerified: result.status,
+            emailVerifiedAt: new Date(),
+          });
+        }
+        results.push({ id: l.id, status: result.status });
+      }
+      res.json({ success: true, data: { verified: results.length, results } });
+    } catch (error: any) {
+      console.error('Bulk verify error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Phase 7 — LinkedIn daily limit status for the Dashboard banner.
   // Surfaces per-action used/cap/percent so the frontend can render a
   // warning at >80% consumed. In-memory counters — Phase 9 moves to
@@ -1369,6 +1454,154 @@ and to comply with all applicable anti-spam and data-protection laws in your own
 your recipients' jurisdictions.</p>`
       )
     );
+  });
+
+  // Phase 8 — SendGrid event webhook. Handles bounce, spamreport,
+  // unsubscribe (backup to our one-click), open, and click. Signature
+  // verification per SendGrid's Event Webhook docs:
+  //   1. ecdsa-with-SHA256 over (timestamp + rawBody)
+  //   2. Public key from SENDGRID_WEBHOOK_PUBLIC_KEY env
+  // We skip verification in dev when the key isn't set — otherwise a
+  // misconfigured local env silently drops all events.
+  app.post('/api/webhooks/sendgrid', express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+      const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+      const publicKey = process.env.SENDGRID_WEBHOOK_PUBLIC_KEY;
+
+      if (publicKey) {
+        const signature = req.header('X-Twilio-Email-Event-Webhook-Signature');
+        const timestamp = req.header('X-Twilio-Email-Event-Webhook-Timestamp');
+        if (!signature || !timestamp) {
+          return res.status(401).json({ success: false, error: 'Missing signature headers' });
+        }
+        try {
+          const crypto = await import('crypto');
+          const verifier = crypto.createVerify('sha256');
+          verifier.update(timestamp + rawBody.toString());
+          const valid = verifier.verify(
+            { key: publicKey, format: 'pem' },
+            signature,
+            'base64'
+          );
+          if (!valid) {
+            return res.status(401).json({ success: false, error: 'Invalid signature' });
+          }
+        } catch (err) {
+          console.error('SendGrid webhook signature verify error:', err);
+          return res.status(401).json({ success: false, error: 'Signature verification failed' });
+        }
+      }
+
+      const events = JSON.parse(rawBody.toString()) as Array<{
+        event: string;
+        email: string;
+        timestamp: number;
+        sg_event_id?: string;
+        emailId?: string;
+        campaignId?: string;
+        workspaceId?: string;
+        reason?: string;
+        type?: string;
+      }>;
+
+      for (const ev of events) {
+        try {
+          await handleSendgridEvent(ev);
+        } catch (err) {
+          console.error('SendGrid event handler error:', { ev: ev.event, err });
+        }
+      }
+
+      res.json({ success: true, processed: events.length });
+    } catch (error: any) {
+      console.error('SendGrid webhook error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  async function handleSendgridEvent(ev: {
+    event: string;
+    email: string;
+    timestamp: number;
+    emailId?: string;
+    campaignId?: string;
+    workspaceId?: string;
+    reason?: string;
+    type?: string;
+  }) {
+    const ts = new Date(ev.timestamp * 1000);
+    const email = ev.email.toLowerCase();
+
+    // Find the outreach_emails row — prefer the customArg id, fall back
+    // to latest-by-recipient.
+    const row =
+      (ev.emailId && (await storage.getLatestOutreachEmailByRecipient(email))) ||
+      (await storage.getLatestOutreachEmailByRecipient(email));
+
+    switch (ev.event) {
+      case 'bounce': {
+        if (row) await storage.updateOutreachEmailStatus(row.id, 'bounced', ts);
+        if (row?.leadId) await storage.markLeadEmailStatus(row.leadId, 'bounced');
+        // Hard bounce → permanent suppression; soft bounce gets one free pass.
+        if (ev.type === 'hard') {
+          await storage.addSuppressionEntry({
+            workspaceId: ev.workspaceId ?? null,
+            email,
+            domain: null,
+            reason: 'bounced',
+          });
+        }
+        break;
+      }
+      case 'spamreport': {
+        if (row) await storage.updateOutreachEmailStatus(row.id, 'spam', ts);
+        await storage.addSuppressionEntry({
+          workspaceId: ev.workspaceId ?? null,
+          email,
+          domain: null,
+          reason: 'spam_report',
+        });
+        break;
+      }
+      case 'unsubscribe': {
+        await storage.addSuppressionEntry({
+          workspaceId: ev.workspaceId ?? null,
+          email,
+          domain: null,
+          reason: 'unsubscribed',
+        });
+        break;
+      }
+      case 'open': {
+        if (row) await storage.updateOutreachEmailStatus(row.id, 'opened', ts);
+        break;
+      }
+      case 'click': {
+        if (row) await storage.updateOutreachEmailStatus(row.id, 'clicked', ts);
+        break;
+      }
+      // 'delivered', 'processed', 'deferred', 'dropped' — we don't act on these
+      default:
+        break;
+    }
+  }
+
+  // Open tracking pixel fallback — returns a 1x1 transparent GIF and
+  // updates outreach_emails.opened_at. Defense-in-depth against mail
+  // clients that strip SendGrid's native open tracking pixel.
+  const TRANSPARENT_GIF = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'base64'
+  );
+  app.get('/track/open/:emailId', async (req, res) => {
+    try {
+      await storage.updateOutreachEmailStatus(req.params.emailId, 'opened', new Date());
+    } catch (err) {
+      console.error('Open tracking error:', err);
+    }
+    res.setHeader('Content-Type', 'image/gif');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.send(TRANSPARENT_GIF);
   });
 
   // Public unsubscribe — no auth required. Verifies HMAC-signed token,

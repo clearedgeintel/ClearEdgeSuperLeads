@@ -922,20 +922,43 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateOutreachEmailStatus(id: string, status: string, timestamp?: Date): Promise<void> {
-    const updates: any = { status };
-    
-    if (status === 'sent' && timestamp) {
-      updates.sentAt = timestamp;
-    } else if (status === 'opened' && timestamp) {
-      updates.openedAt = timestamp;
-    } else if (status === 'replied' && timestamp) {
-      updates.repliedAt = timestamp;
-    }
+    const updates: Partial<OutreachEmail> = { status };
+    const ts = timestamp ?? new Date();
+
+    if (status === 'sent') updates.sentAt = ts;
+    else if (status === 'opened') updates.openedAt = ts;
+    else if (status === 'clicked') updates.clickedAt = ts;
+    else if (status === 'replied') updates.repliedAt = ts;
+    else if (status === 'bounced') updates.bouncedAt = ts;
+    else if (status === 'spam') updates.bouncedAt = ts;
 
     await db
       .update(outreachEmails)
       .set(updates)
       .where(eq(outreachEmails.id, id));
+  }
+
+  // Find the most recent outreach_emails row for a recipient so a
+  // SendGrid webhook lacking customArgs can still credit the event
+  // back to the right send.
+  async getLatestOutreachEmailByRecipient(
+    email: string
+  ): Promise<OutreachEmail | undefined> {
+    const [row] = await db
+      .select()
+      .from(outreachEmails)
+      .where(eq(outreachEmails.recipientEmail, email))
+      .orderBy(desc(outreachEmails.sentAt))
+      .limit(1);
+    return row;
+  }
+
+  // Mark a lead's email status when a bounce/spam event lands.
+  async markLeadEmailStatus(leadId: string, status: string): Promise<void> {
+    await db
+      .update(leads)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(leads.id, leadId));
   }
 
   // ============================================================
@@ -958,6 +981,16 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(campaigns)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  async countEmailSendsSince(workspaceId: string | null, since: Date): Promise<number> {
+    const conditions = [gte(outreachEmails.sentAt, since)];
+    if (workspaceId) conditions.push(eq(outreachEmails.workspaceId, workspaceId));
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(outreachEmails)
       .where(and(...conditions));
     return row?.count ?? 0;
   }

@@ -71,6 +71,32 @@ function extractItems<T>(raw: unknown): T[] {
   return [];
 }
 
+// Phase 8 — auto-reply / OOO detection. When the reply body matches any
+// of these patterns, the classifier's sentiment is overridden to
+// 'out_of_office' and the enrollment is paused for 14 days instead of
+// indefinitely. Case-insensitive, must match anywhere in the first 500
+// chars of the message.
+const OOO_PATTERNS: RegExp[] = [
+  /out\s*of\s*office/i,
+  /out\s*of\s*the\s*office/i,
+  /on\s*vacation/i,
+  /on\s*holiday/i,
+  /away\s+(from\s+my\s+)?(desk|office)/i,
+  /away\s+until/i,
+  /auto[-\s]*reply/i,
+  /automatic\s*(reply|response)/i,
+  /will\s+be\s+(back|returning)/i,
+  /return(ing)?\s+on\s+\d/i,
+];
+
+function detectOutOfOffice(messageText: string | null | undefined): boolean {
+  if (!messageText) return false;
+  const sample = messageText.slice(0, 500);
+  return OOO_PATTERNS.some((p) => p.test(sample));
+}
+
+const OOO_PAUSE_DAYS = 14;
+
 export class InboxSyncService {
   async sync(workspaceId?: string | null): Promise<InboxSyncResult> {
     const classifications: Record<ReplySentiment, number> = {
@@ -110,26 +136,41 @@ export class InboxSyncService {
       if (already) continue;
 
       const messageText = chat.last_message ?? chat.text ?? '';
-      const sentiment = await classifyReply(messageText);
+
+      // Phase 8 — OOO keyword check overrides the classifier. Auto-
+      // replies are almost always misclassified as 'neutral' or
+      // 'positive' (they're polite, formal, and often contain the
+      // word "thank you"), which would then pause the enrollment
+      // forever. Better to treat them as a temporary hold.
+      const isOoo = detectOutOfOffice(messageText);
+      const sentiment: ReplySentiment = isOoo
+        ? 'out_of_office'
+        : await classifyReply(messageText);
       classifications[sentiment]++;
 
       await storage.createEngagementEvent({
         workspaceId: lead.workspaceId ?? null,
         leadId: lead.id,
-        eventType: 'reply_received',
+        eventType: isOoo ? 'out_of_office' : 'reply_received',
         sentiment,
-        eventData: { message: messageText, chatId: chat.id ?? null },
+        eventData: { message: messageText, chatId: chat.id ?? null, ooo: isOoo },
         occurredAt: new Date(),
       });
 
-      if (lead.status !== 'meeting_booked') {
+      if (lead.status !== 'meeting_booked' && !isOoo) {
         await storage.updateLead(lead.id, { status: 'replied' });
       }
 
-      // Pause enrollment on reply
+      // Enrollment handling — OOO pauses for 14 days via ooo_until,
+      // real replies pause indefinitely until the operator unpauses.
       const enrollment = await storage.getActiveEnrollmentForLead(lead.id);
       if (enrollment) {
-        await storage.updateEnrollment(enrollment.id, { status: 'paused' });
+        if (isOoo) {
+          const oooUntil = new Date(Date.now() + OOO_PAUSE_DAYS * 86_400_000);
+          await storage.updateEnrollment(enrollment.id, { oooUntil });
+        } else {
+          await storage.updateEnrollment(enrollment.id, { status: 'paused' });
+        }
       }
 
       // Phase 4: credit the reply to the prompt variant that generated
