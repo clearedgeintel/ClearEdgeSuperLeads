@@ -47,7 +47,7 @@ Merged build combining **ConsultantCRM-GBP** (Google lead discovery + email outr
 | Realtime | Server-Sent Events (SSE) | New — Phase 11 |
 | Enrichment | Apollo.io / Hunter.io | New — Phase 10 |
 | CRM | HubSpot | Both apps |
-| Automation | n8n workflows | From ClearEdge Leads |
+| Scheduled jobs | `node-cron` in-process | Replaces n8n (see Design Decisions) |
 | Build | Vite, esbuild | From GBP app |
 
 ---
@@ -111,7 +111,7 @@ HUBSPOT_API_KEY=                 # HubSpot private app token
 PORT=5000
 APP_URL=http://localhost:5000
 NODE_ENV=development
-API_KEY=                         # For n8n webhook auth
+API_KEY=                         # For internal machine-to-machine webhooks
 
 # Rate limiting
 RATE_LIMIT_WINDOW_MS=900000
@@ -130,7 +130,7 @@ RATE_LIMIT_MAX=100
 - [x] Extract both source codebases into `_source/` (gitignored) as read-only snapshots
 - [x] Initialize new project from GBP app as base (copy `_source/ConsultantCRM-GBP-main/` contents into workspace root)
 - [x] Stage ClearEdge Leads JavaScript into `_reference/` (clearedge-lib, clearedge-middleware, clearedge-api, clearedge-tests, clearedge-migrations) — ported incrementally phase by phase, not en masse
-- [x] Copy `n8n/linkedin-queue-workflow.json` into project root `n8n/`
+- [x] Copy `n8n/linkedin-queue-workflow.json` into project root `n8n/` (kept as reference only — Phase 3 replaces it with an in-process worker, see Design Decisions)
 - [x] Rename project in `package.json` → `clearedge-outreach`
 - [x] Exclude `_source/` and `_reference/` from `tsconfig.json` so JS reference files don't break typecheck
 - [x] Add ESLint + Prettier config from ClearEdge Leads, upgraded for TypeScript (`@typescript-eslint/*`, `eslint-plugin-react-hooks`)
@@ -220,7 +220,7 @@ Create `shared/schema.ts` with all table definitions:
 - [x] Keep Google OAuth from GBP app as primary login (`server/services/googleAuth.ts`)
 - [x] On first login, auto-create a personal workspace for the user (handled in `storage.upsertUser` so every auth path — Google OAuth + demo login — gets a workspace)
 - [x] Keep `fallbackAuth.ts` for local dev demo login
-- [x] Port `middleware/auth.js` → [server/middleware/auth.ts](server/middleware/auth.ts) as `apiKeyAuth` — used for webhook/n8n endpoints, distinct from session-based `requireAuth` in `fallbackAuth.ts`
+- [x] Port `middleware/auth.js` → [server/middleware/auth.ts](server/middleware/auth.ts) as `apiKeyAuth` — used for machine-to-machine webhook endpoints, distinct from session-based `requireAuth` in `fallbackAuth.ts`
 - [x] Add [server/middleware/requireWorkspace.ts](server/middleware/requireWorkspace.ts) stub — injects `req.workspace` via a typed Express.Request augmentation in [server/types/session.d.ts](server/types/session.d.ts). Non-blocking until Phase 9 promotes it to a hard 403 gate.
 - [x] Port `middleware/validate.js` → [server/middleware/validate.ts](server/middleware/validate.ts) as `validateBody<T>(schema)` — generic Zod wrapper
 - [x] Port `middleware/error-handler.js` → [server/middleware/errorHandler.ts](server/middleware/errorHandler.ts) — uses `console.error` for now; swapped for pino in Phase 6's structured-logger pass
@@ -315,11 +315,17 @@ All routes from the GBP base are already mounted in [server/routes.ts](server/ro
 - [ ] **`SendQueue.tsx`** — Pending | Approved | Sent | Failed tabs; per-item edit + approve/skip; bulk actions
 - [ ] **`Inbox.tsx`** — sync button, reply list with classification badge, lead modal on click
 
-### 3.4 n8n workflow update
+### 3.4 In-process queue worker
 
-- [ ] Copy `n8n/linkedin-queue-workflow.json`, update webhook URLs and credentials
-- [ ] Add error branch with Slack notification on failure
-- [ ] Document import instructions in README
+Replaces the original `n8n/linkedin-queue-workflow.json` with an in-process background worker using `server/lib/backgroundQueue.ts` (already in place from the GBP base). No external n8n instance required.
+
+- [ ] `server/jobs/queueGenerationJob.ts` — wraps `queueGenerationService.ts` in a function the worker can call. Generates AI drafts for pending enrollments, with retry + logging.
+- [ ] `server/jobs/queueDispatchJob.ts` — wraps `unipileDispatchService.ts`. Picks approved queue items, enforces `linkedinLimiter`, dispatches via Unipile, writes `send_log`.
+- [ ] `server/jobs/inboxSyncJob.ts` — wraps `inboxSyncService.ts`. Polls Unipile inbox and writes engagement events.
+- [ ] `server/jobs/scheduler.ts` — wires `node-cron` schedules: queue generation every 15 min, dispatch every 5 min, inbox sync every 10 min (all disabled in test env). Imported once from `server/index.ts` on boot.
+- [ ] `POST /api/jobs/:name/run` — manual trigger endpoint behind `apiKeyAuth`, for ops / on-demand execution. Replaces the n8n "run now" button.
+- [ ] On job failure → structured error log + optional Slack webhook (if `SLACK_WEBHOOK_URL` in `app_config`, Phase 11)
+- [ ] Document disabled-in-test + manual trigger pattern in README
 
 ---
 
@@ -568,7 +574,7 @@ Build `Settings.tsx`:
 - [ ] Before every email send — check `monthly_email_sends_used < plan_limit`; return 402 if over
 - [ ] Before every LinkedIn dispatch — check `monthly_linkedin_sends_used < plan_limit`
 - [ ] Increment counters on successful dispatch (not queue insert)
-- [ ] Reset counters on 1st of month via n8n scheduled workflow
+- [ ] Reset counters on 1st of month via `server/jobs/usageResetJob.ts` (node-cron `0 0 1 * *`) — resets `monthly_email_sends_used` and `monthly_linkedin_sends_used` to 0 for all workspaces
 - [ ] Soft warning at 80% — yellow header banner; hard block at 100% with upgrade CTA
 
 ### 9.5 Multi-account LinkedIn (Agency plan)
@@ -622,7 +628,7 @@ Build `Settings.tsx`:
 ### 10.5 Scheduled re-enrichment
 
 - [ ] `re_enrich_after` column in `leads` — set to `now() + 90 days` on enrich
-- [ ] n8n daily workflow: find leads where `re_enrich_after < now()` and `status != 'converted'`, re-run enrichment
+- [ ] `server/jobs/reEnrichmentJob.ts` (node-cron `0 3 * * *`, daily at 3am UTC): finds leads where `re_enrich_after < now()` and `status != 'converted'`, re-runs enrichment in batches with `linkedinLimiter` throttling
 - [ ] Re-enrichment settings in Settings.tsx: toggle on/off, interval (30/60/90 days)
 
 ---
@@ -655,14 +661,15 @@ Build `Settings.tsx`:
 ### 11.4 Slack + email daily digest
 
 - [ ] Add `slack_webhook_url` to workspace `app_config`
-- [ ] n8n 8am daily workflow: replies, connections, pending queue, campaigns at limit → Slack or email
-- [ ] Slack integration section in Settings.tsx — webhook URL + test button
+- [ ] `server/jobs/dailyDigestJob.ts` (node-cron `0 8 * * *`): queries last 24h of replies, new connections, pending queue items, and campaigns near limits; sends formatted message to the workspace's Slack webhook (or email via Phase 8 SendGrid)
+- [ ] Slack integration section in Settings.tsx — webhook URL + test button (posts a "ClearEdge test message" payload)
 
-### 11.5 n8n error alerting
+### 11.5 Job error alerting
 
-- [ ] Error branch in all n8n workflows → Slack message (workflow name, failed node, error, timestamp)
-- [ ] `POST /api/webhooks/n8n-error` — logs to `audit_log`
-- [ ] Last n8n run timestamp + error state in Settings.tsx → Automation section
+- [ ] Shared `notifyJobFailure(jobName, err, context)` helper in `server/jobs/alerting.ts`: logs to `audit_log`, increments a job-health counter, and posts to Slack webhook if configured
+- [ ] Every cron job in `server/jobs/` wraps its work in try/catch and calls `notifyJobFailure` on throw
+- [ ] Last successful run timestamp and last error per job tracked in `app_config` (keys: `job:<name>:last_ok`, `job:<name>:last_error`)
+- [ ] Settings.tsx → Automation section shows each job's last run + error state (replaces the old n8n health panel idea)
 
 ---
 
@@ -738,6 +745,9 @@ Every table and list must have an actionable zero-state (not a blank screen):
 ---
 
 ## Key Design Decisions
+
+### In-process jobs instead of n8n
+The original ClearEdge Leads app ran its scheduled work through n8n (`linkedin-queue-workflow.json`). For the unified platform we drop the n8n dependency and handle all recurring work in-process via `node-cron` schedules under `server/jobs/`. Reasoning: every roadmap use case is a simple cron job or a fire-and-forget background task — queue generation, dispatch, inbox sync, monthly usage reset, daily re-enrichment, 8am digest. None of them involve branching logic a non-developer would edit, and none of them need to survive outside the app process. Keeping jobs in TypeScript means: one deploy target, one log stream, one `.env`, real git diffs, real unit tests, and end-to-end type safety through Drizzle. The n8n workflow JSON stays under `n8n/` as a reference snapshot of the original flow, but is neither deployed nor imported. `POST /api/jobs/:name/run` (behind `apiKeyAuth`) provides the manual "run now" hook that the n8n UI used to offer.
 
 ### `_source/` and `_reference/` folder strategy
 The two source codebases land in `_source/` (gitignored snapshots, extracted from the zips the user provides) and `_reference/` (tracked in git, containing the ClearEdge Leads JavaScript files that will be ported phase by phase). The GBP project is the base — its contents are copied directly into the workspace root in Phase 1.1. ClearEdge Leads is not merged in at once; each `.js` file in `_reference/` is rewritten as TypeScript and moved into `server/services/` or `server/lib/` at the moment its owning phase (2–5) reaches it. This keeps `npm run check` passing at every commit and avoids a week-long .js → .ts conversion sprint at the start.
@@ -842,11 +852,18 @@ shared/
 __tests__/
   (all ported + new tests per phase)
 
-n8n/
-  linkedin-queue-workflow.json
-  daily-digest-workflow.json    # Phase 11
-  re-enrichment-workflow.json   # Phase 10
-  usage-reset-workflow.json     # Phase 9
+server/jobs/                    # In-process scheduled work (replaces n8n)
+  scheduler.ts                  # node-cron wiring, imported from server/index.ts
+  alerting.ts                   # notifyJobFailure shared helper
+  queueGenerationJob.ts         # Phase 3 — every 15 min
+  queueDispatchJob.ts           # Phase 3 — every 5 min
+  inboxSyncJob.ts               # Phase 3 — every 10 min
+  usageResetJob.ts              # Phase 9 — 1st of month
+  reEnrichmentJob.ts            # Phase 10 — 3am daily
+  dailyDigestJob.ts             # Phase 11 — 8am daily
+
+n8n/                            # Reference-only snapshot (gitignored from compile)
+  linkedin-queue-workflow.json  # Original workflow, kept for reference
 
 public/
   privacy.html                  # Phase 7
