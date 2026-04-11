@@ -198,6 +198,34 @@ Respond with JSON in this format:
       throw new Error(`Email generation failed: ${error.message}`);
     }
   }
+
+  /**
+   * Generate a LinkedIn outreach message from a pre-built prompt.
+   * Caller is responsible for template interpolation (see promptEngine.ts).
+   * Returns the message text plus token usage for cost tracking.
+   */
+  async generateLinkedInMessage(prompt: string): Promise<{
+    text: string;
+    inputTokens?: number;
+    outputTokens?: number;
+  }> {
+    const message = await withRetry(() =>
+      anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      })
+    );
+
+    const block = message.content[0];
+    const text = block && block.type === 'text' ? block.text : '';
+
+    return {
+      text,
+      inputTokens: message.usage?.input_tokens,
+      outputTokens: message.usage?.output_tokens,
+    };
+  }
 }
 
 export const aiService = new AIService();

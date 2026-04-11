@@ -12,6 +12,10 @@ import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
 import { linkedInSearchService, LinkedInSearchLimitError } from "./services/linkedinSearchService";
+import { queueGenerationService } from "./services/queueGenerationService";
+import { unipileDispatchService } from "./services/unipileDispatchService";
+import { inboxSyncService } from "./services/inboxSyncService";
+import { apiKeyAuth } from "./middleware/auth";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 
 import { nanoid } from "nanoid";
@@ -626,6 +630,268 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Get outreach campaigns error:', error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Unified campaign routes (Phase 3 — supports both email and LinkedIn channels)
+  app.get('/api/campaigns', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const rows = await storage.getCampaigns(user.id, user.workspaceId);
+      res.json({ success: true, data: rows });
+    } catch (error: any) {
+      console.error('Get campaigns error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/campaigns/:id', requireAuth, async (req, res) => {
+    try {
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) return res.status(404).json({ success: false, error: 'Campaign not found' });
+      const steps = await storage.getCampaignSteps(campaign.id);
+      res.json({ success: true, data: { ...campaign, steps } });
+    } catch (error: any) {
+      console.error('Get campaign error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/campaigns', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const { name, description, outreachChannel, tone, dailySendLimit, maxTouches, requireApproval, emailTemplate } = req.body ?? {};
+      if (!name) return res.status(400).json({ success: false, error: 'name is required' });
+      const campaign = await storage.createCampaign({
+        name,
+        description: description ?? null,
+        outreachChannel: outreachChannel ?? 'linkedin',
+        tone: tone ?? 'consultative',
+        dailySendLimit: dailySendLimit ?? 20,
+        maxTouches: maxTouches ?? 5,
+        requireApproval: requireApproval ?? true,
+        emailTemplate: emailTemplate ?? null,
+        status: 'draft',
+        createdBy: user.id,
+        workspaceId: user.workspaceId,
+      });
+      res.json({ success: true, data: campaign });
+    } catch (error: any) {
+      console.error('Create campaign error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/campaigns/:id', requireAuth, async (req, res) => {
+    try {
+      const campaign = await storage.updateCampaign(req.params.id, req.body ?? {});
+      res.json({ success: true, data: campaign });
+    } catch (error: any) {
+      console.error('Update campaign error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete('/api/campaigns/:id', requireAuth, async (req, res) => {
+    try {
+      await storage.deleteCampaign(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Delete campaign error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Campaign steps
+  app.get('/api/campaign-steps', requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.query.campaignId as string | undefined;
+      if (!campaignId) return res.status(400).json({ success: false, error: 'campaignId query param required' });
+      const steps = await storage.getCampaignSteps(campaignId);
+      res.json({ success: true, data: steps });
+    } catch (error: any) {
+      console.error('Get campaign steps error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/campaign-steps', requireAuth, async (req, res) => {
+    try {
+      const { campaignId, stepOrder, stepType, delayDays, promptTemplate, characterLimit } = req.body ?? {};
+      if (!campaignId || stepOrder === undefined || !stepType) {
+        return res.status(400).json({ success: false, error: 'campaignId, stepOrder, stepType are required' });
+      }
+      const step = await storage.createCampaignStep({
+        campaignId,
+        stepOrder,
+        stepType,
+        delayDays: delayDays ?? 0,
+        promptTemplate: promptTemplate ?? null,
+        characterLimit: characterLimit ?? null,
+      });
+      res.json({ success: true, data: step });
+    } catch (error: any) {
+      console.error('Create campaign step error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete('/api/campaign-steps/:id', requireAuth, async (req, res) => {
+    try {
+      await storage.deleteCampaignStep(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Delete campaign step error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Message generation — single enrollment
+  app.post('/api/messages/generate', requireAuth, async (req, res) => {
+    try {
+      const { enrollmentId, stepId } = req.body ?? {};
+      if (!enrollmentId || !stepId) {
+        return res.status(400).json({ success: false, error: 'enrollmentId and stepId are required' });
+      }
+      const result = await queueGenerationService.generateForEnrollment(enrollmentId, stepId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Generate message error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Message generation — batch. Wired behind both session auth (for ops UI
+  // "Generate now" button) and apiKeyAuth (for the scheduled cron job).
+  app.post('/api/messages/trigger-batch', (req, res, next) => {
+    if (req.session?.user) return next();
+    return apiKeyAuth(req, res, next);
+  }, async (_req, res) => {
+    try {
+      const result = await queueGenerationService.generateBatch();
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Trigger batch error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Enroll a lead into a campaign
+  app.post('/api/campaigns/:id/enroll', requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.params.id;
+      const { leadId } = req.body ?? {};
+      if (!leadId) return res.status(400).json({ success: false, error: 'leadId is required' });
+      const enrollment = await storage.enrollLead({
+        campaignId,
+        leadId,
+        currentStepOrder: 0,
+        status: 'active',
+      });
+      res.json({ success: true, data: enrollment });
+    } catch (error: any) {
+      console.error('Enroll lead error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Send queue management (Phase 3 — queue-management.js port)
+  app.get('/api/queue', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const status = (req.query.status as string | undefined) ?? 'pending';
+      const items = await storage.getSendQueueByStatus(status, user.workspaceId);
+      res.json({ success: true, data: items });
+    } catch (error: any) {
+      console.error('Get queue error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/queue/stats', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const stats = await storage.getQueueStats(user.workspaceId);
+      res.json({ success: true, data: stats });
+    } catch (error: any) {
+      console.error('Queue stats error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/queue/:id', requireAuth, async (req, res) => {
+    try {
+      const { status, editedDraft } = req.body ?? {};
+      const updates: { status?: string; editedDraft?: string; reviewedAt?: Date } = {};
+      if (status) updates.status = status;
+      if (typeof editedDraft === 'string') updates.editedDraft = editedDraft;
+      if (status) updates.reviewedAt = new Date();
+      const row = await storage.updateSendQueueItem(req.params.id, updates);
+      res.json({ success: true, data: row });
+    } catch (error: any) {
+      console.error('Update queue item error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/queue/bulk-approve', requireAuth, async (req, res) => {
+    try {
+      const { ids } = req.body ?? {};
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ success: false, error: 'ids array required' });
+      }
+      const approved = await storage.bulkUpdateQueueStatus(ids, 'pending', 'approved');
+      res.json({ success: true, data: { approved } });
+    } catch (error: any) {
+      console.error('Bulk approve error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/queue/bulk-skip', requireAuth, async (req, res) => {
+    try {
+      const { ids } = req.body ?? {};
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ success: false, error: 'ids array required' });
+      }
+      const skipped = await storage.bulkUpdateQueueStatus(ids, 'pending', 'skipped');
+      res.json({ success: true, data: { skipped } });
+    } catch (error: any) {
+      console.error('Bulk skip error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Dispatch approved queue items via Unipile. Wired for session auth
+  // (ops UI) and apiKeyAuth (scheduler cron).
+  app.post('/api/queue/dispatch', (req, res, next) => {
+    if (req.session?.user) return next();
+    return apiKeyAuth(req, res, next);
+  }, async (req, res) => {
+    try {
+      const workspaceId = req.session?.user?.workspaceId ?? null;
+      const result = await unipileDispatchService.dispatchApproved(workspaceId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Dispatch error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Unipile inbox sync — fetches new replies + accepted connections,
+  // classifies reply sentiment, records engagement_events. Session auth
+  // for ops UI, apiKeyAuth for the scheduler cron.
+  app.post('/api/inbox/sync', (req, res, next) => {
+    if (req.session?.user) return next();
+    return apiKeyAuth(req, res, next);
+  }, async (req, res) => {
+    try {
+      const workspaceId = req.session?.user?.workspaceId ?? null;
+      const result = await inboxSyncService.sync(workspaceId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Inbox sync error:', error);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

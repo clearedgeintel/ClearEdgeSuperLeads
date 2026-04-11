@@ -3,6 +3,11 @@ import {
   leads,
   gbpProfiles,
   campaigns,
+  campaignSteps,
+  campaignEnrollments,
+  sendQueue,
+  sendLog,
+  engagementEvents,
   outreachEmails,
   workspaces,
   appConfig,
@@ -14,12 +19,20 @@ import {
   type InsertGbpProfile,
   type Campaign,
   type InsertCampaign,
+  type CampaignStep,
+  type InsertCampaignStep,
+  type CampaignEnrollment,
+  type InsertCampaignEnrollment,
+  type SendQueueItem,
+  type InsertSendQueueItem,
+  type SendLogEntry,
+  type EngagementEvent,
   type OutreachEmail,
   type InsertOutreachEmail,
   type Workspace,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, isNull, or } from "drizzle-orm";
+import { eq, and, desc, asc, isNull, or, sql, gte, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 export interface IStorage {
@@ -59,6 +72,53 @@ export interface IStorage {
   // Outreach operations
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   getCampaigns(userId: string, workspaceId?: string | null): Promise<Campaign[]>;
+  getCampaign(id: string): Promise<Campaign | undefined>;
+  updateCampaign(id: string, updates: Partial<Campaign>): Promise<Campaign>;
+  deleteCampaign(id: string): Promise<void>;
+
+  // Campaign steps
+  createCampaignStep(step: InsertCampaignStep): Promise<CampaignStep>;
+  getCampaignSteps(campaignId: string): Promise<CampaignStep[]>;
+  deleteCampaignStep(id: string): Promise<void>;
+
+  // Campaign enrollments
+  enrollLead(enrollment: InsertCampaignEnrollment): Promise<CampaignEnrollment>;
+  getEnrollments(campaignId: string): Promise<CampaignEnrollment[]>;
+  getEnrollment(id: string): Promise<CampaignEnrollment | undefined>;
+  getActiveEnrollmentsForLead(leadId: string): Promise<CampaignEnrollment[]>;
+  getAllActiveEnrollments(): Promise<CampaignEnrollment[]>;
+  updateEnrollment(id: string, updates: Partial<CampaignEnrollment>): Promise<CampaignEnrollment>;
+
+  // Campaign step lookups
+  getCampaignStep(id: string): Promise<CampaignStep | undefined>;
+  getCampaignStepByOrder(campaignId: string, stepOrder: number): Promise<CampaignStep | undefined>;
+
+  // Send queue
+  createSendQueueItem(item: InsertSendQueueItem): Promise<SendQueueItem>;
+  getSendQueueItem(id: string): Promise<SendQueueItem | undefined>;
+  getSendQueueByStatus(status: string, workspaceId?: string | null): Promise<SendQueueItem[]>;
+  updateSendQueueItem(id: string, updates: Partial<SendQueueItem>): Promise<SendQueueItem>;
+  findExistingQueueItem(enrollmentId: string, campaignStepId: string): Promise<SendQueueItem | undefined>;
+  bulkUpdateQueueStatus(ids: string[], fromStatus: string, toStatus: string): Promise<number>;
+  getQueueStats(workspaceId?: string | null): Promise<Record<string, number>>;
+
+  // Send log
+  createSendLog(entry: Omit<SendLogEntry, 'id'>): Promise<SendLogEntry>;
+  countSuccessfulSends(campaignId: string, leadId: string): Promise<number>;
+  countSendsForCampaignSince(campaignId: string, since: Date): Promise<number>;
+  getLastSendForCampaignLead(campaignId: string, leadId: string): Promise<SendLogEntry | undefined>;
+
+  // Engagement
+  createEngagementEvent(event: Omit<EngagementEvent, 'id'>): Promise<EngagementEvent>;
+  getEngagementEventsForLead(leadId: string): Promise<EngagementEvent[]>;
+  hasEngagementEvent(leadId: string, eventType: string): Promise<boolean>;
+
+  // Lead lookups for inbox sync
+  getLeadsWithUnipileMemberId(workspaceId?: string | null): Promise<Lead[]>;
+  getActiveEnrollmentForLead(leadId: string): Promise<CampaignEnrollment | undefined>;
+  getLastSentQueueItemForLead(leadId: string): Promise<SendQueueItem | undefined>;
+
+  // Email outreach
   createOutreachEmail(email: InsertOutreachEmail): Promise<OutreachEmail>;
   getOutreachEmails(campaignId?: string): Promise<OutreachEmail[]>;
   getOutreachEmailsByUser(userId: string, workspaceId?: string | null): Promise<OutreachEmail[]>;
@@ -295,6 +355,308 @@ export class DatabaseStorage implements IStorage {
     const conditions = [eq(campaigns.createdBy, userId)];
     if (workspaceId) conditions.push(eq(campaigns.workspaceId, workspaceId));
     return await db.select().from(campaigns).where(and(...conditions));
+  }
+
+  async getCampaign(id: string): Promise<Campaign | undefined> {
+    const [row] = await db.select().from(campaigns).where(eq(campaigns.id, id));
+    return row;
+  }
+
+  async updateCampaign(id: string, updates: Partial<Campaign>): Promise<Campaign> {
+    const [row] = await db
+      .update(campaigns)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(campaigns.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteCampaign(id: string): Promise<void> {
+    // Soft delete — preserves send_log and engagement_events referential integrity.
+    await db
+      .update(campaigns)
+      .set({ isDeleted: true, updatedAt: new Date() })
+      .where(eq(campaigns.id, id));
+  }
+
+  // Campaign steps — multi-step LinkedIn sequences
+  async createCampaignStep(stepData: InsertCampaignStep): Promise<CampaignStep> {
+    const [step] = await db
+      .insert(campaignSteps)
+      .values({ id: nanoid(), ...stepData })
+      .returning();
+    return step;
+  }
+
+  async getCampaignSteps(campaignId: string): Promise<CampaignStep[]> {
+    return await db
+      .select()
+      .from(campaignSteps)
+      .where(eq(campaignSteps.campaignId, campaignId))
+      .orderBy(asc(campaignSteps.stepOrder));
+  }
+
+  async deleteCampaignStep(id: string): Promise<void> {
+    await db.delete(campaignSteps).where(eq(campaignSteps.id, id));
+  }
+
+  // Campaign enrollments — a lead's progress through a campaign
+  async enrollLead(enrollmentData: InsertCampaignEnrollment): Promise<CampaignEnrollment> {
+    const [enrollment] = await db
+      .insert(campaignEnrollments)
+      .values({ id: nanoid(), ...enrollmentData })
+      .returning();
+    return enrollment;
+  }
+
+  async getEnrollments(campaignId: string): Promise<CampaignEnrollment[]> {
+    return await db
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.campaignId, campaignId));
+  }
+
+  async getActiveEnrollmentsForLead(leadId: string): Promise<CampaignEnrollment[]> {
+    return await db
+      .select()
+      .from(campaignEnrollments)
+      .where(
+        and(eq(campaignEnrollments.leadId, leadId), eq(campaignEnrollments.status, 'active'))
+      );
+  }
+
+  async updateEnrollment(
+    id: string,
+    updates: Partial<CampaignEnrollment>
+  ): Promise<CampaignEnrollment> {
+    const [row] = await db
+      .update(campaignEnrollments)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(campaignEnrollments.id, id))
+      .returning();
+    return row;
+  }
+
+  async getEnrollment(id: string): Promise<CampaignEnrollment | undefined> {
+    const [row] = await db
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.id, id));
+    return row;
+  }
+
+  async getAllActiveEnrollments(): Promise<CampaignEnrollment[]> {
+    return await db
+      .select()
+      .from(campaignEnrollments)
+      .where(eq(campaignEnrollments.status, 'active'));
+  }
+
+  // Campaign step lookups
+  async getCampaignStep(id: string): Promise<CampaignStep | undefined> {
+    const [row] = await db.select().from(campaignSteps).where(eq(campaignSteps.id, id));
+    return row;
+  }
+
+  async getCampaignStepByOrder(
+    campaignId: string,
+    stepOrder: number
+  ): Promise<CampaignStep | undefined> {
+    const [row] = await db
+      .select()
+      .from(campaignSteps)
+      .where(and(eq(campaignSteps.campaignId, campaignId), eq(campaignSteps.stepOrder, stepOrder)));
+    return row;
+  }
+
+  // Send queue
+  async createSendQueueItem(itemData: InsertSendQueueItem): Promise<SendQueueItem> {
+    const [row] = await db
+      .insert(sendQueue)
+      .values({ id: nanoid(), ...itemData })
+      .returning();
+    return row;
+  }
+
+  async getSendQueueItem(id: string): Promise<SendQueueItem | undefined> {
+    const [row] = await db.select().from(sendQueue).where(eq(sendQueue.id, id));
+    return row;
+  }
+
+  async getSendQueueByStatus(
+    status: string,
+    workspaceId?: string | null
+  ): Promise<SendQueueItem[]> {
+    const conditions = [eq(sendQueue.status, status), isNull(sendQueue.deletedAt)];
+    if (workspaceId) conditions.push(eq(sendQueue.workspaceId, workspaceId));
+    return await db
+      .select()
+      .from(sendQueue)
+      .where(and(...conditions))
+      .orderBy(desc(sendQueue.createdAt));
+  }
+
+  async updateSendQueueItem(
+    id: string,
+    updates: Partial<SendQueueItem>
+  ): Promise<SendQueueItem> {
+    const [row] = await db
+      .update(sendQueue)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(sendQueue.id, id))
+      .returning();
+    return row;
+  }
+
+  async findExistingQueueItem(
+    enrollmentId: string,
+    campaignStepId: string
+  ): Promise<SendQueueItem | undefined> {
+    const [row] = await db
+      .select()
+      .from(sendQueue)
+      .where(
+        and(
+          eq(sendQueue.enrollmentId, enrollmentId),
+          eq(sendQueue.campaignStepId, campaignStepId),
+          isNull(sendQueue.deletedAt)
+        )
+      );
+    return row;
+  }
+
+  async bulkUpdateQueueStatus(
+    ids: string[],
+    fromStatus: string,
+    toStatus: string
+  ): Promise<number> {
+    if (ids.length === 0) return 0;
+    const rows = await db
+      .update(sendQueue)
+      .set({
+        status: toStatus,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(inArray(sendQueue.id, ids), eq(sendQueue.status, fromStatus)))
+      .returning({ id: sendQueue.id });
+    return rows.length;
+  }
+
+  async getQueueStats(workspaceId?: string | null): Promise<Record<string, number>> {
+    const statuses = ['pending', 'approved', 'sent', 'skipped', 'failed'];
+    const counts: Record<string, number> = {};
+    for (const status of statuses) {
+      const conditions = [eq(sendQueue.status, status), isNull(sendQueue.deletedAt)];
+      if (workspaceId) conditions.push(eq(sendQueue.workspaceId, workspaceId));
+      const [row] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(sendQueue)
+        .where(and(...conditions));
+      counts[status] = row?.count ?? 0;
+    }
+    return counts;
+  }
+
+  // Send log
+  async createSendLog(entryData: Omit<SendLogEntry, 'id'>): Promise<SendLogEntry> {
+    const [row] = await db
+      .insert(sendLog)
+      .values({ id: nanoid(), ...entryData })
+      .returning();
+    return row;
+  }
+
+  async countSuccessfulSends(campaignId: string, leadId: string): Promise<number> {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sendLog)
+      .where(
+        and(
+          eq(sendLog.campaignId, campaignId),
+          eq(sendLog.leadId, leadId),
+          eq(sendLog.dispatchStatus, 'success')
+        )
+      );
+    return row?.count ?? 0;
+  }
+
+  async countSendsForCampaignSince(campaignId: string, since: Date): Promise<number> {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sendLog)
+      .where(and(eq(sendLog.campaignId, campaignId), gte(sendLog.dispatchedAt, since)));
+    return row?.count ?? 0;
+  }
+
+  async getLastSendForCampaignLead(
+    campaignId: string,
+    leadId: string
+  ): Promise<SendLogEntry | undefined> {
+    const [row] = await db
+      .select()
+      .from(sendLog)
+      .where(and(eq(sendLog.campaignId, campaignId), eq(sendLog.leadId, leadId)))
+      .orderBy(desc(sendLog.dispatchedAt))
+      .limit(1);
+    return row;
+  }
+
+  // Engagement events
+  async createEngagementEvent(
+    eventData: Omit<EngagementEvent, 'id'>
+  ): Promise<EngagementEvent> {
+    const [row] = await db
+      .insert(engagementEvents)
+      .values({ id: nanoid(), ...eventData })
+      .returning();
+    return row;
+  }
+
+  async getEngagementEventsForLead(leadId: string): Promise<EngagementEvent[]> {
+    return await db
+      .select()
+      .from(engagementEvents)
+      .where(eq(engagementEvents.leadId, leadId))
+      .orderBy(desc(engagementEvents.occurredAt));
+  }
+
+  async hasEngagementEvent(leadId: string, eventType: string): Promise<boolean> {
+    const [row] = await db
+      .select({ id: engagementEvents.id })
+      .from(engagementEvents)
+      .where(
+        and(eq(engagementEvents.leadId, leadId), eq(engagementEvents.eventType, eventType))
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  async getLeadsWithUnipileMemberId(workspaceId?: string | null): Promise<Lead[]> {
+    const conditions = [sql`${leads.unipileMemberId} IS NOT NULL`];
+    if (workspaceId) conditions.push(eq(leads.workspaceId, workspaceId));
+    return await db.select().from(leads).where(and(...conditions));
+  }
+
+  async getActiveEnrollmentForLead(leadId: string): Promise<CampaignEnrollment | undefined> {
+    const [row] = await db
+      .select()
+      .from(campaignEnrollments)
+      .where(
+        and(eq(campaignEnrollments.leadId, leadId), eq(campaignEnrollments.status, 'active'))
+      )
+      .limit(1);
+    return row;
+  }
+
+  async getLastSentQueueItemForLead(leadId: string): Promise<SendQueueItem | undefined> {
+    const [row] = await db
+      .select()
+      .from(sendQueue)
+      .where(and(eq(sendQueue.leadId, leadId), eq(sendQueue.status, 'sent')))
+      .orderBy(desc(sendQueue.createdAt))
+      .limit(1);
+    return row;
   }
 
   async createOutreachEmail(emailData: InsertOutreachEmail): Promise<OutreachEmail> {

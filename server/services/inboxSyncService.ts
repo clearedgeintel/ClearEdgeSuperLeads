@@ -1,0 +1,179 @@
+// Unipile inbox sync service — polls the Unipile chat + invitations APIs,
+// matches activity against known leads (by unipile_member_id), classifies
+// replies via Claude, and records engagement events. Ported from
+// ClearEdge Leads api/sync-unipile-inbox.js.
+//
+// Phase 4 will re-enable two pieces that are deferred here:
+//   - recordReplyForVersion: A/B prompt-version reply tracking
+//   - storeConversation: RAG knowledge base write-through
+// Both are commented on the relevant call sites below.
+
+import { storage } from '../storage';
+import { withRetry } from '../lib/retry';
+import { classifyReply, type ReplySentiment } from './replyClassifier';
+import type { Lead } from '@shared/schema';
+
+export interface InboxSyncResult {
+  replies: number;
+  connectionsAccepted: number;
+  classifications: Record<ReplySentiment, number>;
+}
+
+interface UnipileChat {
+  id?: string;
+  sender_id?: string;
+  attendees?: Array<{ id?: string }>;
+  last_message?: string;
+  text?: string;
+}
+
+interface UnipileInvitation {
+  id?: string;
+  linkedin_member_id?: string;
+  recipient_id?: string;
+}
+
+function getBaseUrl(): string {
+  const raw =
+    process.env.UNIPILE_BASE_URL || 'https://api30.unipile.com:16074/api/v1/accounts';
+  return raw.replace(/\/api\/v1\/accounts\/?$/, '');
+}
+
+async function unipileGet<T>(path: string): Promise<T> {
+  const apiKey = process.env.UNIPILE_API_KEY;
+  if (!apiKey) throw new Error('UNIPILE_API_KEY not set');
+
+  return withRetry<T>(
+    async () => {
+      const res = await fetch(`${getBaseUrl()}${path}`, {
+        headers: { 'X-API-KEY': apiKey, accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        const err: Error & { status?: number } = new Error(`Unipile ${res.status}: ${text}`);
+        err.status = res.status;
+        throw err;
+      }
+      return (await res.json()) as T;
+    },
+    { label: `unipile:GET:${path}` }
+  );
+}
+
+function extractItems<T>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw as T[];
+  if (raw && typeof raw === 'object' && 'items' in raw) {
+    const items = (raw as { items?: unknown }).items;
+    if (Array.isArray(items)) return items as T[];
+  }
+  return [];
+}
+
+export class InboxSyncService {
+  async sync(workspaceId?: string | null): Promise<InboxSyncResult> {
+    const classifications: Record<ReplySentiment, number> = {
+      positive: 0,
+      negative: 0,
+      neutral: 0,
+      out_of_office: 0,
+      unclassified: 0,
+    };
+    let replies = 0;
+    let connectionsAccepted = 0;
+
+    // 1. Fetch chats from Unipile (don't fail whole sync if this errors)
+    let chatItems: UnipileChat[] = [];
+    try {
+      const raw = await unipileGet<unknown>('/api/v1/chats');
+      chatItems = extractItems<UnipileChat>(raw);
+    } catch (err) {
+      console.warn('[inboxSync] chat fetch failed, skipping replies check', err);
+    }
+
+    // Build lookup map from unipile_member_id -> lead
+    const leadsWithMember = await storage.getLeadsWithUnipileMemberId(workspaceId);
+    const leadMap = new Map<string, Lead>();
+    for (const lead of leadsWithMember) {
+      if (lead.unipileMemberId) leadMap.set(lead.unipileMemberId, lead);
+    }
+
+    // 2. Process chats — detect new replies
+    for (const chat of chatItems) {
+      const senderId = chat.sender_id ?? chat.attendees?.[0]?.id;
+      if (!senderId) continue;
+      const lead = leadMap.get(senderId);
+      if (!lead) continue;
+
+      const already = await storage.hasEngagementEvent(lead.id, 'reply_received');
+      if (already) continue;
+
+      const messageText = chat.last_message ?? chat.text ?? '';
+      const sentiment = await classifyReply(messageText);
+      classifications[sentiment]++;
+
+      await storage.createEngagementEvent({
+        workspaceId: lead.workspaceId ?? null,
+        leadId: lead.id,
+        eventType: 'reply_received',
+        sentiment,
+        eventData: { message: messageText, chatId: chat.id ?? null },
+        occurredAt: new Date(),
+      });
+
+      if (lead.status !== 'meeting_booked') {
+        await storage.updateLead(lead.id, { status: 'replied' });
+      }
+
+      // Pause enrollment on reply
+      const enrollment = await storage.getActiveEnrollmentForLead(lead.id);
+      if (enrollment) {
+        await storage.updateEnrollment(enrollment.id, { status: 'paused' });
+      }
+
+      // Phase 4: recordReplyForVersion + storeConversation (RAG) against
+      // the last sent queue item for this lead. Deferred because both
+      // live inside promptEngine/ragEngine which the roadmap consolidates
+      // in the AI Engine Consolidation pass.
+      // const lastQueueItem = await storage.getLastSentQueueItemForLead(lead.id);
+
+      replies++;
+    }
+
+    // 3. Fetch accepted invitations from Unipile
+    let inviteItems: UnipileInvitation[] = [];
+    try {
+      const raw = await unipileGet<unknown>('/api/v1/linkedin/invitations?status=accepted');
+      inviteItems = extractItems<UnipileInvitation>(raw);
+    } catch (err) {
+      console.warn('[inboxSync] invitation fetch failed, skipping', err);
+    }
+
+    for (const invite of inviteItems) {
+      const memberId = invite.linkedin_member_id ?? invite.recipient_id;
+      if (!memberId) continue;
+      const lead = leadMap.get(memberId);
+      if (!lead) continue;
+
+      const already = await storage.hasEngagementEvent(lead.id, 'connection_accepted');
+      if (already) continue;
+
+      await storage.createEngagementEvent({
+        workspaceId: lead.workspaceId ?? null,
+        leadId: lead.id,
+        eventType: 'connection_accepted',
+        sentiment: null,
+        eventData: { invitationId: invite.id ?? null },
+        occurredAt: new Date(),
+      });
+
+      if (lead.status === 'new' || lead.status === 'contacted') {
+        await storage.updateLead(lead.id, { status: 'connected' });
+      }
+      connectionsAccepted++;
+    }
+
+    return { replies, connectionsAccepted, classifications };
+  }
+}
+
+export const inboxSyncService = new InboxSyncService();
