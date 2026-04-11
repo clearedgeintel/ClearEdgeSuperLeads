@@ -5,6 +5,7 @@ import {
   campaigns,
   outreachEmails,
   workspaces,
+  appConfig,
   type User,
   type UpsertUser,
   type Lead,
@@ -18,13 +19,16 @@ import {
   type Workspace,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 export interface IStorage {
   // Workspace operations
   getWorkspace(id: string): Promise<Workspace | undefined>;
   createPersonalWorkspace(userId: string, email: string | null): Promise<Workspace>;
+
+  // App config
+  getAppConfig(key: string, workspaceId?: string | null): Promise<string | null>;
 
   // User operations
   getUser(id: string): Promise<User | undefined>;
@@ -33,6 +37,9 @@ export interface IStorage {
 
   // Lead operations
   createLead(lead: InsertLead): Promise<Lead>;
+  upsertLeadByLinkedInUrl(
+    lead: InsertLead
+  ): Promise<{ lead: Lead; inserted: boolean }>;
   getLeads(
     userId: string,
     workspaceId?: string | null,
@@ -77,6 +84,27 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return workspace;
+  }
+
+  // App config — workspace-scoped key/value store. Falls back to a
+  // workspace-null row if the workspace-specific key isn't set.
+  async getAppConfig(key: string, workspaceId?: string | null): Promise<string | null> {
+    const rows = await db
+      .select()
+      .from(appConfig)
+      .where(
+        and(
+          eq(appConfig.key, key),
+          workspaceId
+            ? or(eq(appConfig.workspaceId, workspaceId), isNull(appConfig.workspaceId))!
+            : isNull(appConfig.workspaceId)
+        )
+      );
+
+    if (rows.length === 0) return null;
+    // Prefer workspace-specific row over the global fallback.
+    const scoped = rows.find((r) => r.workspaceId === workspaceId);
+    return (scoped ?? rows[0]).value;
   }
 
   // User operations
@@ -135,6 +163,32 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return lead;
+  }
+
+  // Upsert a LinkedIn lead on the linkedin_url natural key. Returns the row
+  // and whether it was newly inserted (true) or already existed (false).
+  // Note: leads.linkedin_url is NOT constrained unique in the schema yet
+  // (Phase 9 adds per-workspace uniqueness), so we do find-then-insert.
+  async upsertLeadByLinkedInUrl(
+    leadData: InsertLead
+  ): Promise<{ lead: Lead; inserted: boolean }> {
+    if (!leadData.linkedinUrl) {
+      throw new Error('upsertLeadByLinkedInUrl: linkedinUrl is required');
+    }
+    const [existing] = await db
+      .select()
+      .from(leads)
+      .where(eq(leads.linkedinUrl, leadData.linkedinUrl));
+
+    if (existing) {
+      return { lead: existing, inserted: false };
+    }
+
+    const [inserted] = await db
+      .insert(leads)
+      .values({ id: nanoid(), ...leadData })
+      .returning();
+    return { lead: inserted, inserted: true };
   }
 
   async getLeads(

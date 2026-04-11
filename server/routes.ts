@@ -11,6 +11,7 @@ import { emailService } from "./services/email";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
+import { linkedInSearchService, LinkedInSearchLimitError } from "./services/linkedinSearchService";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 
 import { nanoid } from "nanoid";
@@ -420,6 +421,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Lead scoring error:', error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // LinkedIn search routes (Phase 3 — Unipile-backed prospect search)
+  app.post('/api/linkedin/search', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const { query, title, company, industry, location, cursor } = req.body ?? {};
+      const result = await linkedInSearchService.search(
+        { query, title, company, industry, location, cursor },
+        user.workspaceId
+      );
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      if (error instanceof LinkedInSearchLimitError) {
+        return res.status(429).json({
+          success: false,
+          error: error.message,
+          remaining: error.remaining,
+        });
+      }
+      console.error('LinkedIn search error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/linkedin/search/save', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const profiles = Array.isArray(req.body?.profiles) ? req.body.profiles : [];
+      if (profiles.length === 0) {
+        return res.status(400).json({ success: false, error: 'profiles array is required' });
+      }
+      const { result, leads } = await linkedInSearchService.saveProfiles(
+        profiles,
+        user.id,
+        user.workspaceId
+      );
+      res.json({ success: true, data: result, leads });
+    } catch (error: any) {
+      console.error('LinkedIn save error:', error);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

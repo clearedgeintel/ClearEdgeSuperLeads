@@ -282,22 +282,22 @@ All routes from the GBP base are already mounted in [server/routes.ts](server/ro
 
 ### 3.1 Backend services (ported from ClearEdge Leads)
 
-- [ ] Port `api/linkedin-search.js` → `server/services/linkedinSearchService.ts`
+- [x] Port `api/linkedin-search.js` → [server/services/linkedinSearchService.ts](server/services/linkedinSearchService.ts) — `search()` + `saveProfiles()` methods. Pure service layer (no Express objects); routes in `server/routes.ts` wrap them. Added `storage.upsertLeadByLinkedInUrl` and `storage.getAppConfig` as supporting methods.
 - [ ] Port `api/unipile-dispatch.js` → `server/services/unipileDispatchService.ts`
 - [ ] Port `api/sync-unipile-inbox.js` → `server/services/inboxSyncService.ts`
 - [ ] Port `api/queue-management.js` → `server/services/queueService.ts`
 - [ ] Port `api/trigger-queue-generation.js` → `server/services/queueGenerationService.ts`
 - [ ] Port `api/enrich-leads.js` → extend enrichment service for LinkedIn leads
 - [ ] Port `api/lead-scoring.js` → extend AI service
-- [ ] Port `lib/linkedin-limiter.js` → `server/lib/linkedinLimiter.ts`
-- [ ] Port `lib/retry.js` → `server/lib/retry.ts`
-- [ ] Port `lib/api-tracker.js` → `server/lib/apiTracker.ts`
-- [ ] Port `lib/logger.js` → `server/lib/logger.ts`
+- [x] Port `lib/linkedin-limiter.js` → [server/lib/linkedinLimiter.ts](server/lib/linkedinLimiter.ts) — in-memory hourly counters per action (search/dispatch/email), `humanDelay()` for 2–6s jitter
+- [x] Port `lib/retry.js` → [server/lib/retry.ts](server/lib/retry.ts) — generic `withRetry<T>` with exponential backoff + jitter, retryable status codes
+- [x] Port `lib/api-tracker.js` → [server/lib/apiTracker.ts](server/lib/apiTracker.ts) — console shim for now; Phase 5 promotes to a DB-backed `api_usage_log` table when analytics needs it
+- [ ] Port `lib/logger.js` → `server/lib/logger.ts` — deferred to Phase 6's structured-logger pass; `console.*` used in the meantime
 
 ### 3.2 API routes (LinkedIn)
 
-- [ ] `POST /api/linkedin/search`
-- [ ] `POST /api/linkedin/search/save`
+- [x] `POST /api/linkedin/search` — Unipile-backed prospect search, rate-limited via `linkedinLimiter`, returns 429 + remaining quota on limit
+- [x] `POST /api/linkedin/search/save` — upserts selected profiles as leads (on `linkedin_url`), returns `{saved, skipped, errors}`
 - [ ] `POST /api/campaigns/:id/enroll`
 - [ ] `POST /api/messages/generate`
 - [ ] `POST /api/messages/trigger-batch`
