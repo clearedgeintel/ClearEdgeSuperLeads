@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { SettingsIcon, Save, DollarSign, Zap } from "lucide-react";
+import SuppressionList from "./SuppressionList";
 
 interface SettingsResponse {
   values: Record<string, string>;
@@ -188,6 +189,9 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Suppression list (Phase 7 — CAN-SPAM/GDPR compliance) */}
+      <SuppressionList />
 
       {/* API usage */}
       {settings?.usage && (

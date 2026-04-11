@@ -6,13 +6,28 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const { toast } = useToast();
 
+  const requireAcceptance = (): boolean => {
+    if (!termsAccepted) {
+      toast({
+        title: 'Accept the Terms first',
+        description: 'Check the box below before continuing.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+    return true;
+  };
+
   const handleGoogleLogin = () => {
+    if (!requireAcceptance()) return;
     window.location.href = '/api/auth/google';
   };
 
   const handleDemoLogin = async () => {
+    if (!requireAcceptance()) return;
     setIsLoading(true);
     try {
       const response = await fetch('/api/auth/demo-login', {
@@ -89,6 +104,29 @@ export default function Login() {
           <p className="text-xs text-gray-500 text-center mt-4">
             Demo account provides full access to test all features
           </p>
+
+          {/* Terms acceptance + legal links */}
+          <div className="mt-6 pt-4 border-t border-gray-200">
+            <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                I agree to the{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  Terms of Service
+                </a>{' '}
+                and{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  Privacy Policy
+                </a>
+                .
+              </span>
+            </label>
+          </div>
         </CardContent>
       </Card>
     </div>

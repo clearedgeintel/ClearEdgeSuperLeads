@@ -12,6 +12,7 @@ import {
   remaining,
   humanDelay,
 } from '../lib/linkedinLimiter';
+import { logger } from '../lib/logger';
 import type { SendQueueItem, CampaignStep } from '@shared/schema';
 
 export interface DispatchResult {
@@ -249,6 +250,27 @@ export class UnipileDispatchService {
       status: 'sent',
       reviewedAt: new Date(),
     });
+
+    // Phase 7 — audit every LinkedIn action for ToS compliance review.
+    // Writes are best-effort; a failure in audit must not roll back the
+    // send itself (the message already went through Unipile).
+    try {
+      await storage.createAuditEntry({
+        workspaceId: item.workspaceId ?? null,
+        userId: null,
+        action: `linkedin_${actualStepType}`,
+        entityType: 'lead',
+        entityId: lead.id,
+        metadata: {
+          queueItemId: item.id,
+          unipileMessageId,
+          stepType: actualStepType,
+          campaignId: step?.campaignId ?? null,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err }, '[dispatch] audit_log write failed');
+    }
 
     if (actualStepType === 'connection_request') {
       await storage.updateLead(lead.id, { status: 'contacted' });

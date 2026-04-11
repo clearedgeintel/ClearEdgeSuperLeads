@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { Button } from "@/components/ui/button";
-import { MapPin, LogOut } from "lucide-react";
+import { MapPin, LogOut, AlertTriangle } from "lucide-react";
 import LeadDiscovery from "@/components/LeadDiscovery";
 import LinkedInLeads from "@/components/LinkedInLeads";
 import CampaignBuilder from "@/components/CampaignBuilder";
@@ -15,11 +16,28 @@ import Analytics from "@/components/Analytics";
 import Reports from "@/components/Reports";
 import Settings from "@/components/Settings";
 
+interface LinkedInLimit {
+  action: string;
+  used: number;
+  cap: number;
+  percent: number;
+}
+
 export default function Dashboard() {
   const { user, isLoading } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('leadDiscovery');
   const [apiStatus, setApiStatus] = useState<any>({});
+
+  // Phase 7 — LinkedIn daily limit banner. Polls once a minute so
+  // operators see a warning before they hit the hard cap mid-batch.
+  const { data: limitsData } = useQuery<{ success: boolean; data: LinkedInLimit[] }>({
+    queryKey: ['/api/linkedin/limits'],
+    refetchInterval: 60_000,
+    enabled: !!user,
+  });
+  const limits = limitsData?.data ?? [];
+  const warnings = limits.filter((l) => l.percent >= 80 && l.cap > 0);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -86,6 +104,25 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Phase 7 — LinkedIn ToS warning banner at >=80% of daily cap */}
+      {warnings.length > 0 && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-3">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0" />
+            <div className="text-sm text-yellow-900">
+              <span className="font-semibold">Approaching LinkedIn daily limits:</span>{' '}
+              {warnings.map((w, i) => (
+                <span key={w.action}>
+                  {i > 0 && ', '}
+                  {w.action.replace(/_/g, ' ')} {w.used}/{w.cap} ({w.percent}%)
+                </span>
+              ))}
+              . Further requests this tier will be rate-limited.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">

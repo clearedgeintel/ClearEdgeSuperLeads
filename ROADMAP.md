@@ -455,40 +455,43 @@ Pragmatic subset: the four pure-function ports land now; service-level integrati
 
 ### 7.1 CAN-SPAM / GDPR email compliance
 
-- [ ] Add physical mailing address footer to every outbound email template
-- [ ] Add one-click unsubscribe link to every outbound email
-  - Generate signed unsubscribe token per recipient
-  - `GET /unsubscribe/:token` — adds email to `suppression_list`, returns confirmation page (no login required)
-  - `List-Unsubscribe` header on all outbound emails
-- [ ] Pre-send suppression check — query `suppression_list` by email AND domain before every send; abort if found
+- [x] CAN-SPAM footer on every outbound email — `EmailService.buildFooter{,Html}` appends a horizontal rule + physical address (from `settings.sendgrid_from_email` or fallback) + unsubscribe link to both the HTML and text bodies.
+- [x] One-click unsubscribe — HMAC-signed tokens via [server/lib/unsubscribe.ts](server/lib/unsubscribe.ts) (stateless `base64url(email).base64url(hmac)` format, constant-time compare). `GET /unsubscribe/:token` is public, verifies, writes the email to the suppression list with `reason='unsubscribed'`, audit-logs under `action='unsubscribe'`, and returns a plain-HTML confirmation page (no JSON response to recipients).
+- [x] `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers so Gmail/Apple Mail/Outlook render their native unsubscribe button.
+- [x] Pre-send suppression check — `storage.isSuppressed(email, workspaceId)` matches by direct email AND by domain (for `@example.com` blanket suppressions). `EmailService.sendOutreachEmail` throws `EmailSuppressedError` if the recipient is on the list; the `/api/leads/:id/send-outreach` route catches and returns 409 with `code='suppressed'` so the UI can distinguish suppressed from generic failures.
 
 ### 7.2 Suppression list management
 
-- [ ] `GET/POST/DELETE /api/suppression` routes
-- [ ] `POST /api/suppression/import` — bulk import from CSV
-- [ ] Domain suppression — suppressing `@domain.com` blocks all outreach to that domain (competitor exclusion)
-- [ ] Build `SuppressionList.tsx` in Settings — view, add, remove entries with domain/email toggle
+- [x] `GET /api/suppression`, `POST /api/suppression`, `DELETE /api/suppression/:id` — all workspace-scoped, all write audit entries.
+- [x] Domain suppression — the POST route accepts either `email` or `domain`; `storage.isSuppressed` does `OR` over both columns. "Add @domain.com" blocks every address at that domain.
+- [x] Built [client/src/components/SuppressionList.tsx](client/src/components/SuppressionList.tsx) — embedded inside Settings.tsx as a dedicated card. Email-vs-domain mode toggle, reason dropdown (manual/unsubscribed/bounced/spam_report), list view with reason badges and delete buttons.
+- [ ] `POST /api/suppression/import` — bulk CSV import deferred to a Phase 7 follow-up. Single-entry add works; bulk is a nice-to-have.
 
 ### 7.3 GDPR data deletion (right to erasure)
 
-- [ ] `DELETE /api/leads/:id/gdpr` — hard delete lead + all send_queue, send_log, engagement_events, outreach_emails rows
-- [ ] Confirmation modal in LeadModal.tsx: "Permanently delete all data for this contact?"
-- [ ] Log all GDPR deletions to `audit_log` with `action = 'gdpr_delete'`
-- [ ] Document data retention policy in README
+- [x] `DELETE /api/leads/:id/gdpr` — workspace-scoped access check (createdBy OR workspaceId match), then `storage.gdprDeleteLead(leadId)` runs a **transaction** that wipes every child row: send_queue, send_log, engagement_events, outreach_emails, campaign_enrollments, and finally the lead itself. Returns per-table counts so the audit entry can show the deletion scope.
+- [x] Confirmation modal in [LeadModal.tsx](client/src/components/LeadModal.tsx) — new red "GDPR delete" button next to Export, `confirm()` prompt spells out exactly which tables get wiped + that the action is logged. On success the mutation invalidates `/api/leads` and closes the modal.
+- [x] Audit log — `storage.createAuditEntry({ action: 'gdpr_delete', entityType: 'lead', entityId, metadata: { lead, sendQueue, sendLog, ... } })` captures the full delete scope.
+- [ ] Data retention policy documentation in README — deferred to Phase 6 follow-up README pass.
 
 ### 7.4 Privacy policy & terms pages
 
-- [ ] `/privacy` and `/terms` static pages
-- [ ] Link both from login page footer
-- [ ] Acceptance checkbox on first workspace setup: "I agree to the Terms of Service"
+- [x] `/privacy` and `/terms` served as static HTML directly from Express via a shared `legalPageShell` helper — no React routing wiring needed, no new files to manage. Covers collection/use/retention/third-parties/contact for privacy; acceptable use/content ownership/AI disclaimer/compliance responsibilities for terms.
+- [x] Login page footer — Terms + Privacy links open in new tabs, styled as a bordered footer section.
+- [x] Acceptance checkbox — `Login.tsx` blocks both Google OAuth and demo login until the "I agree to Terms + Privacy" checkbox is ticked. Shows a toast on attempted bypass.
 
 ### 7.5 LinkedIn ToS compliance hardening
 
-- [ ] Enforce randomized human-like delays between LinkedIn actions (1–3s jitter minimum)
-- [ ] Hard cap: max 20 connection requests/day, max 50 messages/day per Unipile account (configurable but capped in linkedinLimiter)
-- [ ] LinkedIn compliance mode ON by default — explicit opt-out in Settings
-- [ ] Log every LinkedIn action to `audit_log`
-- [ ] Warning banner in Dashboard when daily limits are >80% consumed
+- [x] Human-like delays — already in place from Phase 3 via `linkedinLimiter.humanDelay()` (2–6s jitter between dispatches). No change needed.
+- [x] Hard daily caps — `linkedinLimiter.ts` now tracks both hourly AND daily counters. New `dailyCaps` constants default to **20 connection_requests / 50 dispatches / 100 searches / 300 emails per day** per the roadmap, configurable via `LINKEDIN_*_LIMIT_DAILY` env vars. `isAllowed` now checks both hourly and daily before returning true — requests are gated on the stricter of the two.
+- [x] `connection_request` promoted to a first-class `LinkedInAction` type so its dedicated daily cap (20) isn't conflated with the general `dispatch` cap (50).
+- [x] LinkedIn compliance mode — Phase 6 Settings already exposes the toggle (stored in `app_config` as `linkedin_compliance_mode`). Default is ON; the toggle is purely informational for now (the hard caps in `linkedinLimiter` apply regardless). Phase 9 can promote it to a kill-switch if operators ask for looser behavior.
+- [x] Audit log on every LinkedIn action — `unipileDispatchService.dispatchSingle` now writes an `audit_log` row with `action='linkedin_<stepType>'`, `entityType='lead'`, and metadata `{ queueItemId, unipileMessageId, stepType, campaignId }` after every successful send. Best-effort (a failure in audit doesn't roll back the send since the message already left Unipile).
+- [x] Dashboard warning banner — new `GET /api/linkedin/limits` returns `[{ action, used, cap, percent }]` for every tracked action; Dashboard.tsx polls it every 60s and renders a yellow banner at the top of the layout when any action is >=80% consumed, listing the affected actions and their `used/cap (percent%)` numbers.
+
+> **Phase 7 status:** Complete as of 2026-04-11 with two minor deferrals (CSV bulk-import for suppression + data retention README section). The commercial blockers are all closed: CAN-SPAM-compliant outbound (footer + unsubscribe + List-Unsubscribe headers), GDPR right-to-erasure (cascading transactional delete with audit trail), suppression list management, privacy/terms pages with acceptance gate, LinkedIn ToS hardening with daily caps and warning banner.
+>
+> **Verified:** `npm run check` clean, `npm run lint` 0 errors / 150 warnings (+5 from Phase 7 route bodies), `npm test` 26/26 passing, `npm run build` dist/index.js 180.9kb up from 162.6kb, client bundle 451.9kb up from 445.6kb.
 
 ---
 

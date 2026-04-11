@@ -7,11 +7,12 @@ import { storage } from "./storage";
 import { pool } from "./db";
 import { googleAuthService } from "./services/googleAuth";
 import { aiService } from "./services/aiService";
-import { emailService } from "./services/email";
+import { emailService, EmailSuppressedError } from "./services/email";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
 import { linkedInSearchService, LinkedInSearchLimitError } from "./services/linkedinSearchService";
+import { dailyUsed, dailyCap, type LinkedInAction } from "./lib/linkedinLimiter";
 import { queueGenerationService } from "./services/queueGenerationService";
 import { unipileDispatchService } from "./services/unipileDispatchService";
 import { inboxSyncService } from "./services/inboxSyncService";
@@ -32,6 +33,8 @@ import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 import { nanoid } from "nanoid";
 import type { PlaceDetails } from "./services/placesApi";
 import { aiQueue } from "./lib/backgroundQueue";
+
+import { verifyUnsubscribeToken } from "./lib/unsubscribe";
 
 // Serialize an array of objects into an RFC-4180 CSV string. Values are
 // always wrapped in double quotes (embedded quotes doubled) so column
@@ -602,12 +605,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Send email
-      const emailResult = await emailService.sendOutreachEmail(
-        lead.email,
-        emailContent.subject,
-        emailContent.content
-      );
+      // Send email — suppression check + CAN-SPAM footer live inside
+      // the service. Throws EmailSuppressedError if the recipient is
+      // on the workspace's suppression list.
+      let emailResult;
+      try {
+        emailResult = await emailService.sendOutreachEmail(
+          lead.email,
+          emailContent.subject,
+          emailContent.content,
+          { workspaceId: user.workspaceId }
+        );
+      } catch (err) {
+        if (err instanceof EmailSuppressedError) {
+          return res.status(409).json({
+            success: false,
+            error: err.message,
+            code: 'suppressed',
+          });
+        }
+        throw err;
+      }
 
       // Store outreach record
       const outreachEmail = await storage.createOutreachEmail({
@@ -1138,6 +1156,291 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, data: { updated } });
     } catch (error: any) {
       console.error('Update settings error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 7 — LinkedIn daily limit status for the Dashboard banner.
+  // Surfaces per-action used/cap/percent so the frontend can render a
+  // warning at >80% consumed. In-memory counters — Phase 9 moves to
+  // unipile_accounts.daily_sends_used when multi-account lands.
+  app.get('/api/linkedin/limits', requireAuth, (_req, res) => {
+    const actions: LinkedInAction[] = [
+      'search',
+      'connection_request',
+      'dispatch',
+      'email',
+    ];
+    const data = actions.map((action) => {
+      const used = dailyUsed(action);
+      const cap = dailyCap(action);
+      return {
+        action,
+        used,
+        cap,
+        percent: cap > 0 ? Math.round((used / cap) * 100) : 0,
+      };
+    });
+    res.json({ success: true, data });
+  });
+
+  // Phase 7 — Suppression list CRUD
+  app.get('/api/suppression', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const entries = await storage.getSuppressionList(user.workspaceId);
+      res.json({ success: true, data: entries });
+    } catch (error: any) {
+      console.error('Get suppression error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/suppression', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const { email, domain, reason } = req.body ?? {};
+      if (!email && !domain) {
+        return res.status(400).json({ success: false, error: 'email or domain is required' });
+      }
+      if (!reason) {
+        return res.status(400).json({ success: false, error: 'reason is required' });
+      }
+      const entry = await storage.addSuppressionEntry({
+        workspaceId: user.workspaceId ?? null,
+        email: email ? email.toLowerCase() : null,
+        domain: domain ? domain.toLowerCase() : null,
+        reason,
+      });
+      await storage.createAuditEntry({
+        workspaceId: user.workspaceId ?? null,
+        userId: user.id,
+        action: 'suppression_added',
+        entityType: 'suppression_list',
+        entityId: entry.id,
+        metadata: { email, domain, reason },
+      });
+      res.json({ success: true, data: entry });
+    } catch (error: any) {
+      console.error('Add suppression error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete('/api/suppression/:id', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      await storage.removeSuppressionEntry(req.params.id);
+      await storage.createAuditEntry({
+        workspaceId: user.workspaceId ?? null,
+        userId: user.id,
+        action: 'suppression_removed',
+        entityType: 'suppression_list',
+        entityId: req.params.id,
+        metadata: null,
+      });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Remove suppression error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Public static legal pages. Served as raw HTML from Express so we
+  // don't have to register client-side routes in wouter for content
+  // that never changes. Both pages should be linked from the Login
+  // footer and any outbound email footer.
+  const legalPageShell = (title: string, body: string): string => `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${title} — ClearEdge Outreach</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 60px auto; padding: 20px; color: #1f2937; line-height: 1.6; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    h2 { font-size: 18px; margin-top: 28px; color: #111827; }
+    p, li { color: #374151; }
+    a { color: #4f46e5; }
+    .updated { color: #6b7280; font-size: 13px; }
+  </style>
+</head>
+<body>
+${body}
+<p class="updated">Last updated: 2026-04-11</p>
+<p><a href="/">Back to ClearEdge Outreach</a></p>
+</body>
+</html>`;
+
+  app.get('/privacy', (_req, res) => {
+    res.send(
+      legalPageShell(
+        'Privacy Policy',
+        `<h1>Privacy Policy</h1>
+<p>This page describes how ClearEdge Outreach (the "Service") collects, uses, and protects
+information about the people who use it and the prospects it communicates with.</p>
+
+<h2>Information we collect</h2>
+<ul>
+  <li><strong>Workspace operators:</strong> name, email, profile photo, and Google OAuth tokens.</li>
+  <li><strong>Prospects:</strong> publicly available LinkedIn profile data and business-discovery records
+      (Google Places + custom search results). We do not collect private profile data.</li>
+  <li><strong>Outbound messaging:</strong> message content, dispatch timestamps, reply content, and
+      engagement events (connection acceptances, replies, meetings booked).</li>
+  <li><strong>API usage:</strong> Claude and Unipile call counts + token totals for cost analytics.</li>
+</ul>
+
+<h2>How we use information</h2>
+<ul>
+  <li>To power prospect search, AI message generation, dispatch, and reply classification.</li>
+  <li>To compute pipeline analytics and cost reporting within the operator's own workspace.</li>
+  <li>To enforce rate limits and LinkedIn compliance rules.</li>
+  <li>To honor unsubscribe, suppression, and GDPR deletion requests.</li>
+</ul>
+
+<h2>Data retention &amp; deletion</h2>
+<p>Operators can permanently delete any prospect's full record (lead + every child row:
+send_queue, send_log, engagement_events, outreach_emails, enrollments) through the
+"GDPR delete" action in the Lead modal. All GDPR deletions are logged to our audit
+trail under action=<code>gdpr_delete</code>.</p>
+<p>Prospects can unsubscribe via the one-click link in every outbound email; once
+unsubscribed, their address is added to the workspace suppression list and no further
+outreach will be sent from that workspace.</p>
+
+<h2>Third-party services</h2>
+<p>ClearEdge Outreach integrates with Anthropic (Claude), Unipile (LinkedIn automation),
+Google (OAuth + Places API + Custom Search), SendGrid (email delivery), and Supabase
+(managed PostgreSQL). Each vendor has its own privacy policy; operators are responsible
+for ensuring their use of the Service is compatible with the terms of those vendors.</p>
+
+<h2>Contact</h2>
+<p>Unsubscribe requests, GDPR deletion requests, and privacy questions can be sent to the
+workspace operator who contacted you, or through the one-click unsubscribe link in any
+email from us.</p>`
+      )
+    );
+  });
+
+  app.get('/terms', (_req, res) => {
+    res.send(
+      legalPageShell(
+        'Terms of Service',
+        `<h1>Terms of Service</h1>
+<p>By using ClearEdge Outreach (the "Service"), you ("Operator") agree to these terms.</p>
+
+<h2>Acceptable use</h2>
+<ul>
+  <li>The Service is for business-to-business outreach only. You will not use it to send
+      unsolicited consumer messaging, political campaigns, or messages that violate
+      CAN-SPAM, GDPR, PECR, or any other applicable anti-spam law.</li>
+  <li>You will honor all unsubscribe requests within 10 business days (CAN-SPAM requires
+      10; we honor immediately on one-click unsubscribe).</li>
+  <li>You will not use the Service to impersonate another person or organization.</li>
+  <li>You will not abuse the LinkedIn platform or violate LinkedIn's User Agreement.
+      The Service enforces human-like delays and daily caps by default; disabling
+      compliance mode is done at your own risk.</li>
+</ul>
+
+<h2>Your content &amp; data</h2>
+<p>You own the lead data, campaign templates, and message content you create in the
+Service. You grant us a limited license to process that data for the sole purpose of
+delivering the Service to you.</p>
+
+<h2>AI-generated output</h2>
+<p>Messages drafted by the AI engine are recommendations, not endorsements. You are
+responsible for reviewing every outbound message before dispatch (approval mode is ON
+by default). The Service is not liable for the content of AI-generated drafts or for
+any consequences of sending them.</p>
+
+<h2>Service availability</h2>
+<p>The Service is provided "as is" without warranty of uptime, deliverability, or
+LinkedIn acceptance rates. Third-party outages (Anthropic, Unipile, SendGrid, Google)
+can and do affect availability.</p>
+
+<h2>Termination</h2>
+<p>We may suspend or terminate access if we detect abuse of the Service, violation of
+these terms, or material violation of third-party integration terms. You may stop
+using the Service at any time and request full workspace data export before deletion.</p>
+
+<h2>Compliance</h2>
+<p>It is your responsibility to add your physical mailing address to the email footer
+(via Settings → SendGrid from address), to maintain the suppression list in good faith,
+and to comply with all applicable anti-spam and data-protection laws in your own and
+your recipients' jurisdictions.</p>`
+      )
+    );
+  });
+
+  // Public unsubscribe — no auth required. Verifies HMAC-signed token,
+  // adds the email to the suppression list, returns a plain HTML
+  // confirmation page so recipients don't see a JSON blob.
+  app.get('/unsubscribe/:token', async (req, res) => {
+    const email = verifyUnsubscribeToken(req.params.token);
+    if (!email) {
+      return res.status(400).send(
+        `<!doctype html><html><head><title>Invalid link</title></head>
+         <body style="font-family: system-ui; max-width: 560px; margin: 80px auto; padding: 20px;">
+           <h1>Invalid unsubscribe link</h1>
+           <p>This link is not valid. If you'd like to unsubscribe, reply to any email from us
+           with the word "unsubscribe" in the subject.</p>
+         </body></html>`
+      );
+    }
+    try {
+      await storage.addSuppressionEntry({
+        workspaceId: null, // workspace-global unsubscribe — conservative default
+        email: email.toLowerCase(),
+        domain: null,
+        reason: 'unsubscribed',
+      });
+      await storage.createAuditEntry({
+        workspaceId: null,
+        userId: null,
+        action: 'unsubscribe',
+        entityType: 'suppression_list',
+        entityId: null,
+        metadata: { email, source: 'unsubscribe_link' },
+      });
+    } catch (err) {
+      console.error('Unsubscribe insert error:', err);
+      // Fall through — still show success so we don't leak internal errors.
+    }
+    res.send(
+      `<!doctype html><html><head><title>Unsubscribed</title></head>
+       <body style="font-family: system-ui; max-width: 560px; margin: 80px auto; padding: 20px;">
+         <h1>You're unsubscribed</h1>
+         <p><strong>${email}</strong> has been added to our suppression list. You will not
+         receive any further outreach from this workspace.</p>
+         <p style="color: #666; font-size: 14px;">If you believe this is a mistake, please
+         contact the sender directly.</p>
+       </body></html>`
+    );
+  });
+
+  // GDPR hard delete — permanently removes a lead and every child row.
+  // Workspace-scoped access check: the user must own (createdBy) the lead
+  // OR share its workspace_id.
+  app.delete('/api/leads/:id/gdpr', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const lead = await storage.getLead(req.params.id);
+      if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+      if (lead.createdBy !== user.id && lead.workspaceId !== user.workspaceId) {
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+
+      const result = await storage.gdprDeleteLead(req.params.id);
+      await storage.createAuditEntry({
+        workspaceId: user.workspaceId ?? null,
+        userId: user.id,
+        action: 'gdpr_delete',
+        entityType: 'lead',
+        entityId: req.params.id,
+        metadata: result,
+      });
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('GDPR delete error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

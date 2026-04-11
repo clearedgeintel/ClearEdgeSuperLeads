@@ -15,6 +15,8 @@ import {
   outreachEmails,
   workspaces,
   appConfig,
+  suppressionList,
+  auditLog,
   type User,
   type UpsertUser,
   type Lead,
@@ -41,6 +43,10 @@ import {
   type OutreachEmail,
   type InsertOutreachEmail,
   type Workspace,
+  type SuppressionEntry,
+  type InsertSuppressionEntry,
+  type AuditLogEntry,
+  type InsertAuditLogEntry,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, isNull, or, sql, gte, inArray } from "drizzle-orm";
@@ -1169,6 +1175,111 @@ export class DatabaseStorage implements IStorage {
       .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(desc(vocInsights.frequency))
       .limit(50);
+  }
+
+  // ============================================================
+  // Phase 7 — Suppression list, audit log, GDPR cascade delete
+  // ============================================================
+
+  async getSuppressionList(workspaceId?: string | null): Promise<SuppressionEntry[]> {
+    const conditions = [];
+    if (workspaceId) conditions.push(eq(suppressionList.workspaceId, workspaceId));
+    return await db
+      .select()
+      .from(suppressionList)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(suppressionList.createdAt));
+  }
+
+  async addSuppressionEntry(
+    entry: Omit<InsertSuppressionEntry, 'id' | 'createdAt'>
+  ): Promise<SuppressionEntry> {
+    const [row] = await db
+      .insert(suppressionList)
+      .values({ id: nanoid(), ...entry })
+      .returning();
+    return row;
+  }
+
+  async removeSuppressionEntry(id: string): Promise<void> {
+    await db.delete(suppressionList).where(eq(suppressionList.id, id));
+  }
+
+  /**
+   * Returns true if the given recipient email is on the workspace's
+   * suppression list either directly (email match) or by domain
+   * (suppression entry is a `domain` row that matches the right side
+   * of the '@'). Called before every outbound email send.
+   */
+  async isSuppressed(
+    email: string,
+    workspaceId?: string | null
+  ): Promise<SuppressionEntry | null> {
+    const lowered = email.toLowerCase();
+    const domain = lowered.split('@')[1] ?? '';
+    const conditions = [
+      or(eq(suppressionList.email, lowered), eq(suppressionList.domain, domain))!,
+    ];
+    if (workspaceId) conditions.push(eq(suppressionList.workspaceId, workspaceId));
+    const [row] = await db
+      .select()
+      .from(suppressionList)
+      .where(and(...conditions))
+      .limit(1);
+    return row ?? null;
+  }
+
+  // Audit log
+  async createAuditEntry(
+    entry: Omit<InsertAuditLogEntry, 'id' | 'createdAt'>
+  ): Promise<AuditLogEntry> {
+    const [row] = await db
+      .insert(auditLog)
+      .values({ id: nanoid(), ...entry })
+      .returning();
+    return row;
+  }
+
+  /**
+   * GDPR hard delete — wipes a lead and every child row that references
+   * it. Returns counts by table so the calling route can audit the
+   * scope. Runs in a transaction so partial deletes never leave the
+   * DB in a half-deleted state.
+   */
+  async gdprDeleteLead(leadId: string): Promise<{
+    lead: number;
+    sendQueue: number;
+    sendLog: number;
+    engagementEvents: number;
+    outreachEmails: number;
+    enrollments: number;
+  }> {
+    const result = await db.transaction(async (tx) => {
+      const sq = await tx.delete(sendQueue).where(eq(sendQueue.leadId, leadId)).returning();
+      const sl = await tx.delete(sendLog).where(eq(sendLog.leadId, leadId)).returning();
+      const ee = await tx
+        .delete(engagementEvents)
+        .where(eq(engagementEvents.leadId, leadId))
+        .returning();
+      const oe = await tx
+        .delete(outreachEmails)
+        .where(eq(outreachEmails.leadId, leadId))
+        .returning();
+      const enr = await tx
+        .delete(campaignEnrollments)
+        .where(eq(campaignEnrollments.leadId, leadId))
+        .returning();
+      const l = await tx.delete(leads).where(eq(leads.id, leadId)).returning();
+      return {
+        lead: l.length,
+        sendQueue: sq.length,
+        sendLog: sl.length,
+        engagementEvents: ee.length,
+        outreachEmails: oe.length,
+        enrollments: enr.length,
+      };
+    });
+    return result;
   }
 }
 

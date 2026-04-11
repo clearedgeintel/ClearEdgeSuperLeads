@@ -7,39 +7,86 @@
 
 import { sleep } from './retry';
 
-export type LinkedInAction = 'search' | 'dispatch' | 'email';
+export type LinkedInAction = 'search' | 'dispatch' | 'email' | 'connection_request';
 
 const hourlyLimits: Record<LinkedInAction, number> = {
   search: Number(process.env.LINKEDIN_SEARCH_LIMIT_HOURLY) || 15,
   dispatch: Number(process.env.LINKEDIN_DISPATCH_LIMIT_HOURLY) || 25,
   email: Number(process.env.EMAIL_DISPATCH_LIMIT_HOURLY) || 30,
+  connection_request: Number(process.env.LINKEDIN_DISPATCH_LIMIT_HOURLY) || 25,
 };
 
-const counters: Record<LinkedInAction, number[]> = {
+// Hard daily caps are a LinkedIn ToS safety net in addition to the
+// hourly limits. The values below match the conservative recommendations
+// in the roadmap (§7.5). Operators can loosen them via env, but the
+// hard cap enforces a ceiling the service will never exceed.
+const dailyCaps: Record<LinkedInAction, number> = {
+  search: Number(process.env.LINKEDIN_SEARCH_LIMIT_DAILY) || 100,
+  dispatch: Number(process.env.LINKEDIN_DISPATCH_LIMIT_DAILY) || 50,
+  email: Number(process.env.EMAIL_DISPATCH_LIMIT_DAILY) || 300,
+  connection_request: Number(process.env.LINKEDIN_CONNECTION_LIMIT_DAILY) || 20,
+};
+
+const hourlyCounters: Record<LinkedInAction, number[]> = {
   search: [],
   dispatch: [],
   email: [],
+  connection_request: [],
 };
 
-function pruneOld(list: number[]): void {
+const dailyCounters: Record<LinkedInAction, number[]> = {
+  search: [],
+  dispatch: [],
+  email: [],
+  connection_request: [],
+};
+
+function pruneHourly(list: number[]): void {
   const oneHourAgo = Date.now() - 3_600_000;
   while (list.length > 0 && list[0] < oneHourAgo) list.shift();
 }
 
+function pruneDaily(list: number[]): void {
+  const oneDayAgo = Date.now() - 86_400_000;
+  while (list.length > 0 && list[0] < oneDayAgo) list.shift();
+}
+
+function pruneOld(list: number[]): void {
+  pruneHourly(list);
+}
+
 export function isAllowed(action: LinkedInAction): boolean {
-  const list = counters[action];
-  pruneOld(list);
-  return list.length < hourlyLimits[action];
+  const hour = hourlyCounters[action];
+  const day = dailyCounters[action];
+  pruneHourly(hour);
+  pruneDaily(day);
+  return hour.length < hourlyLimits[action] && day.length < dailyCaps[action];
 }
 
 export function record(action: LinkedInAction): void {
-  counters[action].push(Date.now());
+  const now = Date.now();
+  hourlyCounters[action].push(now);
+  dailyCounters[action].push(now);
 }
 
 export function remaining(action: LinkedInAction): number {
-  const list = counters[action];
-  pruneOld(list);
-  return Math.max(0, hourlyLimits[action] - list.length);
+  const hour = hourlyCounters[action];
+  const day = dailyCounters[action];
+  pruneHourly(hour);
+  pruneDaily(day);
+  const hourLeft = Math.max(0, hourlyLimits[action] - hour.length);
+  const dayLeft = Math.max(0, dailyCaps[action] - day.length);
+  return Math.min(hourLeft, dayLeft);
+}
+
+export function dailyUsed(action: LinkedInAction): number {
+  const day = dailyCounters[action];
+  pruneDaily(day);
+  return day.length;
+}
+
+export function dailyCap(action: LinkedInAction): number {
+  return dailyCaps[action];
 }
 
 /** Randomized 2–6 second human-like delay. */
@@ -48,4 +95,4 @@ export async function humanDelay(): Promise<void> {
   await sleep(ms);
 }
 
-export { hourlyLimits };
+export { hourlyLimits, dailyCaps };

@@ -2,7 +2,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Mail, Download, AlertTriangle, Clock, Info, Star, RefreshCw, Globe, MapPin, Upload } from "lucide-react";
+import { Mail, Download, AlertTriangle, Clock, Info, Star, RefreshCw, Globe, MapPin, Upload, Trash2 } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface LeadModalProps {
   lead: any;
@@ -14,6 +17,27 @@ interface LeadModalProps {
 }
 
 export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, onPushToHubSpot }: LeadModalProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const gdprDeleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest('DELETE', `/api/leads/${id}/gdpr`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      toast({
+        title: 'GDPR deletion complete',
+        description: `Removed lead + ${data?.data?.sendLog ?? 0} send_log, ${data?.data?.engagementEvents ?? 0} events, ${data?.data?.outreachEmails ?? 0} emails.`,
+      });
+      onClose();
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
   if (!lead) return null;
 
   const getSeverityIcon = (severity: string) => {
@@ -294,6 +318,20 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
             >
               <Download className="h-4 w-4" />
               <span>Export</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="flex items-center justify-center space-x-2 text-red-600 border-red-200 hover:bg-red-50"
+              onClick={() => {
+                const confirmMessage = `Permanently delete all data for ${lead.businessName}?\n\nThis wipes the lead plus every send_log, engagement_event, send_queue, outreach_email, and enrollment row that references it. This action is irreversible and logged to audit_log under action='gdpr_delete'.`;
+                if (confirm(confirmMessage)) {
+                  gdprDeleteMutation.mutate(lead.id);
+                }
+              }}
+              disabled={gdprDeleteMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>GDPR delete</span>
             </Button>
           </div>
 
