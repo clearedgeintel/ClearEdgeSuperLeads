@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+coverage
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+.env
+.env.local
+.env.production
+
+# Source codebase snapshots (reference only, not tracked)
+_source/
+ConsultantCRM-GBP-main.zip
+clearedge-leads-main.zip

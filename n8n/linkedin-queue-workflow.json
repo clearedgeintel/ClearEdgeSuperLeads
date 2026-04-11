@@ -1,0 +1,351 @@
+{
+  "name": "ClearEdge LinkedIn Outreach Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 8, "triggerAtMinute": 0 }]
+        }
+      },
+      "id": "node-1",
+      "name": "Daily 8AM CT Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Runs daily at 8:00 AM CT to generate due messages"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CLEAREDGE_API_URL}}/api/trigger-queue-generation",
+        "options": {
+          "timeout": 120000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.CLEAREDGE_API_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "node-2",
+      "name": "Generate Due Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300],
+      "notes": "Calls the API to generate AI messages for all due campaign steps",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.data.generated }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "node-3",
+      "name": "Has Generated Messages?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Check if any messages were generated"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.CLEAREDGE_API_URL}}/api/queue?status=pending",
+        "options": {},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.CLEAREDGE_API_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "node-4",
+      "name": "Fetch Pending Count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 200],
+      "notes": "Get count of pending messages for notification"
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.SLACK_CHANNEL || '#linkedin-outreach'}}",
+        "text": "=ClearEdge LinkedIn: {{ $json.data.generated }} new messages ready for review. Total pending: {{ $json.data.pending || 'unknown' }}",
+        "otherOptions": {}
+      },
+      "id": "node-5",
+      "name": "Notify — Messages Ready",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1120, 200],
+      "notes": "Send Slack notification about pending messages."
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 4 }]
+        }
+      },
+      "id": "node-6",
+      "name": "Every 4 Hours Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 560],
+      "notes": "Polls Unipile inbox every 4 hours for new replies and connections"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CLEAREDGE_API_URL}}/api/sync-unipile-inbox",
+        "options": {
+          "timeout": 60000
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.CLEAREDGE_API_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "node-7",
+      "name": "Sync Unipile Inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 560],
+      "notes": "Syncs LinkedIn inbox via Unipile API",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-2",
+              "leftValue": "={{ $json.data.replies }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "node-8",
+      "name": "Has New Replies?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 560],
+      "notes": "Check if any new replies were found"
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.SLACK_CHANNEL || '#linkedin-outreach'}}",
+        "text": "=ClearEdge LinkedIn: {{ $json.data.replies }} new replies from leads! {{ $json.data.connections_accepted }} new connections accepted.",
+        "otherOptions": {}
+      },
+      "id": "node-9",
+      "name": "Notify — New Replies",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [900, 460],
+      "notes": "Send Slack notification about new replies."
+    },
+    {
+      "parameters": {},
+      "id": "node-10",
+      "name": "No Action (Generation)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {},
+      "id": "node-11",
+      "name": "No Action (Replies)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 660]
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.SLACK_CHANNEL || '#linkedin-outreach'}}",
+        "text": "=:rotating_light: ClearEdge LinkedIn ERROR — Queue generation failed.\nError: {{ $json.error.message || JSON.stringify($json) }}",
+        "otherOptions": {}
+      },
+      "id": "node-12",
+      "name": "Notify — Generation Error",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [680, 140],
+      "notes": "Alert on queue generation failure"
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.SLACK_CHANNEL || '#linkedin-outreach'}}",
+        "text": "=:rotating_light: ClearEdge LinkedIn ERROR — Inbox sync failed.\nError: {{ $json.error.message || JSON.stringify($json) }}",
+        "otherOptions": {}
+      },
+      "id": "node-13",
+      "name": "Notify — Sync Error",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [680, 720],
+      "notes": "Alert on inbox sync failure"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 9, "triggerAtMinute": 0, "triggerAtDay": 1 }]
+        }
+      },
+      "id": "node-14",
+      "name": "Weekly Monday 9AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 880],
+      "notes": "Fires every Monday at 9 AM for weekly summary"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.CLEAREDGE_API_URL}}/api/analytics/overview?days=7",
+        "options": { "timeout": 30000 },
+        "headerParameters": {
+          "parameters": [{ "name": "X-API-Key", "value": "={{$env.CLEAREDGE_API_KEY}}" }]
+        }
+      },
+      "id": "node-15",
+      "name": "Fetch Weekly Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 880],
+      "notes": "Get 7-day analytics overview"
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.SLACK_CHANNEL || '#linkedin-outreach'}}",
+        "text": "=:bar_chart: *ClearEdge Weekly Summary*\n\n• Messages sent: {{ $json.data.messages_sent_period }}\n• Connection rate: {{ $json.data.connection_rate }}%\n• Reply rate: {{ $json.data.reply_rate }}%\n• Positive reply rate: {{ $json.data.positive_rate }}%\n• Meetings booked: {{ $json.data.meetings_booked }}\n• Total leads: {{ $json.data.total_leads }}",
+        "otherOptions": {}
+      },
+      "id": "node-16",
+      "name": "Notify — Weekly Summary",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [680, 880],
+      "notes": "Weekly performance summary to Slack"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 20, "triggerAtMinute": 0 }]
+        }
+      },
+      "id": "node-17",
+      "name": "Daily 8PM HubSpot Sync",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 1040],
+      "notes": "Daily sync of unsynced leads to HubSpot"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CLEAREDGE_API_URL}}/api/hubspot/sync-leads",
+        "options": { "timeout": 120000 },
+        "headerParameters": {
+          "parameters": [{ "name": "X-API-Key", "value": "={{$env.CLEAREDGE_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{ "name": "all_unsynced", "value": "={{true}}" }]
+        }
+      },
+      "id": "node-18",
+      "name": "Sync Leads to HubSpot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 1040],
+      "notes": "Push unsynced leads to HubSpot CRM",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.SLACK_CHANNEL || '#linkedin-outreach'}}",
+        "text": "=HubSpot Sync: {{ $json.data.synced }} new, {{ $json.data.updated }} updated, {{ $json.data.failed }} failed",
+        "otherOptions": {}
+      },
+      "id": "node-19",
+      "name": "Notify — HubSpot Sync",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [680, 1040],
+      "notes": "Report HubSpot sync results"
+    }
+  ],
+  "connections": {
+    "Daily 8AM CT Trigger": {
+      "main": [[{ "node": "Generate Due Messages", "type": "main", "index": 0 }]]
+    },
+    "Generate Due Messages": {
+      "main": [
+        [{ "node": "Has Generated Messages?", "type": "main", "index": 0 }],
+        [{ "node": "Notify — Generation Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Generated Messages?": {
+      "main": [
+        [{ "node": "Fetch Pending Count", "type": "main", "index": 0 }],
+        [{ "node": "No Action (Generation)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Pending Count": {
+      "main": [[{ "node": "Notify — Messages Ready", "type": "main", "index": 0 }]]
+    },
+    "Every 4 Hours Trigger": {
+      "main": [[{ "node": "Sync Unipile Inbox", "type": "main", "index": 0 }]]
+    },
+    "Sync Unipile Inbox": {
+      "main": [
+        [{ "node": "Has New Replies?", "type": "main", "index": 0 }],
+        [{ "node": "Notify — Sync Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has New Replies?": {
+      "main": [
+        [{ "node": "Notify — New Replies", "type": "main", "index": 0 }],
+        [{ "node": "No Action (Replies)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Weekly Monday 9AM Trigger": {
+      "main": [[{ "node": "Fetch Weekly Analytics", "type": "main", "index": 0 }]]
+    },
+    "Fetch Weekly Analytics": {
+      "main": [[{ "node": "Notify — Weekly Summary", "type": "main", "index": 0 }]]
+    },
+    "Daily 8PM HubSpot Sync": {
+      "main": [[{ "node": "Sync Leads to HubSpot", "type": "main", "index": 0 }]]
+    },
+    "Sync Leads to HubSpot": {
+      "main": [[{ "node": "Notify — HubSpot Sync", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [{ "name": "ClearEdge", "id": "1" }],
+  "triggerCount": 4
+}

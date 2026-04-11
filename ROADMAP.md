@@ -1,0 +1,863 @@
+# ClearEdge Outreach Platform — Build Roadmap
+
+Merged build combining **ConsultantCRM-GBP** (Google lead discovery + email outreach) and **ClearEdge Leads** (LinkedIn multi-step campaigns via Unipile) into a single production-ready platform.
+
+**12 phases · ~26 weeks to full commercial launch**
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│         React 18 + TypeScript + shadcn/ui + TanStack Query       │
+│  Lead Discovery | LinkedIn | Campaigns | Queue | GBP | Analytics │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────────┐
+│              Express.js + TypeScript — Unified API               │
+│   Auth · Drizzle ORM · Workspace middleware · Rate limiting      │
+└──────┬──────────┬──────────────┬──────────────┬─────────────────┘
+       │          │              │              │
+   AI service  Google service  LinkedIn      Email service
+  (Claude API + (Places API +  service       (SendGrid/Resend +
+  prompt engine  GBP OAuth)    (Unipile)      bounce + tracking)
+  RAG + A/B)
+       │
+┌──────▼──────────────────────────────────────────────────────────┐
+│         PostgreSQL via Supabase — Drizzle ORM (unified schema)   │
+│  workspaces · users · leads · campaigns · send_queue · send_log  │
+│  suppression_list · audit_log · webhook_endpoints · app_config   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Tech Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| Frontend | React 18, TypeScript, Tailwind, shadcn/ui, TanStack Query | From GBP app |
+| Backend | Express.js, TypeScript | From GBP app |
+| ORM | Drizzle ORM | From GBP app |
+| Database | PostgreSQL (Supabase) | Both apps |
+| AI | Anthropic Claude + prompt engine + RAG + A/B testing | From ClearEdge Leads |
+| Google APIs | OAuth 2.0, Custom Search, Places API (New) | From GBP app |
+| LinkedIn | Unipile API | From ClearEdge Leads |
+| Email infrastructure | SendGrid / Resend (replaces Gmail SMTP) | New — Phase 8 |
+| Billing | Stripe | New — Phase 9 |
+| Realtime | Server-Sent Events (SSE) | New — Phase 11 |
+| Enrichment | Apollo.io / Hunter.io | New — Phase 10 |
+| CRM | HubSpot | Both apps |
+| Automation | n8n workflows | From ClearEdge Leads |
+| Build | Vite, esbuild | From GBP app |
+
+---
+
+## Environment Variables
+
+```env
+# Database
+DATABASE_URL=                    # PostgreSQL connection string (Supabase)
+SUPABASE_URL=                    # Supabase project URL
+SUPABASE_ANON_KEY=               # Supabase anon key
+SUPABASE_SERVICE_KEY=            # Supabase service key (server-side only)
+
+# Auth
+SESSION_SECRET=                  # Random string for session encryption
+GOOGLE_CLIENT_ID=                # Google OAuth 2.0 client ID
+GOOGLE_CLIENT_SECRET=            # Google OAuth 2.0 client secret
+
+# Google APIs
+GOOGLE_CUSTOM_SEARCH_API_KEY=    # API key with Custom Search API enabled
+GOOGLE_CUSTOM_SEARCH_ENGINE_ID=  # Programmable Search Engine ID
+GOOGLE_PLACES_API_KEY=           # Places API (New)
+
+# AI
+ANTHROPIC_API_KEY=               # Anthropic Claude API key
+
+# LinkedIn (Unipile)
+UNIPILE_API_KEY=                 # Unipile API key
+UNIPILE_ACCOUNT_ID=              # Unipile LinkedIn account ID
+UNIPILE_BASE_URL=                # Default: https://api1.unipile.com:13465
+
+# Email infrastructure (Phase 8 — replaces Gmail SMTP)
+SENDGRID_API_KEY=                # SendGrid API key
+SENDGRID_FROM_EMAIL=             # Verified sending email address
+SENDGRID_FROM_NAME=              # Sender display name
+SENDGRID_WEBHOOK_SECRET=         # For verifying inbound event webhooks
+# Gmail kept for dev/testing only
+GMAIL_USER=
+GMAIL_PASSWORD=
+
+# Billing (Phase 9)
+STRIPE_SECRET_KEY=               # Stripe secret key
+STRIPE_PUBLISHABLE_KEY=          # Stripe publishable key
+STRIPE_WEBHOOK_SECRET=           # For verifying Stripe webhook events
+STRIPE_SOLO_PRICE_ID=            # Price ID for Solo plan
+STRIPE_TEAM_PRICE_ID=            # Price ID for Team plan
+STRIPE_AGENCY_PRICE_ID=          # Price ID for Agency plan
+
+# Enrichment (Phase 10)
+APOLLO_API_KEY=                  # Apollo.io API key
+HUNTER_API_KEY=                  # Hunter.io API key (email verification)
+
+# Calendar webhooks (Phase 12)
+CALENDLY_WEBHOOK_SECRET=
+CALCOM_WEBHOOK_SECRET=
+
+# CRM
+HUBSPOT_API_KEY=                 # HubSpot private app token
+
+# App
+PORT=5000
+APP_URL=http://localhost:5000
+NODE_ENV=development
+API_KEY=                         # For n8n webhook auth
+
+# Rate limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX=100
+```
+
+---
+
+## Phase 1 — Foundation & Schema Unification
+
+**Timeline:** Week 1–2
+**Goal:** Working monorepo with merged database schema. Both source codebases referenced but all new code lives here.
+
+### 1.1 Project scaffold
+
+- [x] Extract both source codebases into `_source/` (gitignored) as read-only snapshots
+- [x] Initialize new project from GBP app as base (copy `_source/ConsultantCRM-GBP-main/` contents into workspace root)
+- [x] Stage ClearEdge Leads JavaScript into `_reference/` (clearedge-lib, clearedge-middleware, clearedge-api, clearedge-tests, clearedge-migrations) — ported incrementally phase by phase, not en masse
+- [x] Copy `n8n/linkedin-queue-workflow.json` into project root `n8n/`
+- [x] Rename project in `package.json` → `clearedge-outreach`
+- [x] Exclude `_source/` and `_reference/` from `tsconfig.json` so JS reference files don't break typecheck
+- [ ] Add ESLint + Prettier config from ClearEdge Leads, upgraded for TypeScript (`@typescript-eslint/*`)
+- [ ] Add Husky pre-commit hooks (`npm run lint && npm run check`)
+- [ ] Set up Jest config for TypeScript (`jest.config.ts` with `ts-jest` preset, no coverage threshold until Phase 6)
+- [ ] Update `README.md` with full architecture overview
+- [ ] Update `.gitignore` (`_source/`, source zips, `.env`, `coverage/`)
+- [ ] Verify skeleton compiles clean: `npm install && npm run check && npm run lint && npm run build`
+- [ ] `git init` + initial commit
+
+> **Note on JS → TS conversion:** The roadmap originally called for a bulk `.js → .ts` stub rename in this phase. We deferred that. Each ClearEdge Leads file is converted to TypeScript at the moment it is ported into `server/services/` or `server/lib/` during its owning phase (2–5). Files sit untouched in `_reference/` until then. This keeps `npm run check` green throughout the port.
+
+### 1.2 Unified Drizzle schema
+
+Create `shared/schema.ts` with all table definitions:
+
+- [ ] **`workspaces` table** — top-level tenant (stubbed now, activated Phase 9):
+  ```typescript
+  id, name, slug, plan, stripe_customer_id, stripe_subscription_id,
+  monthly_email_sends_used, monthly_linkedin_sends_used, daily_email_limit,
+  created_at
+  ```
+- [ ] **`users` table** — add `workspace_id` FK + `role` ('admin' | 'member'), keep Google OAuth fields
+- [ ] **`leads` table** — unified with `lead_source` discriminator + `workspace_id`:
+  ```typescript
+  lead_source: varchar  // 'google' | 'linkedin'
+  workspace_id: varchar FK
+  // Google-specific (nullable for linkedin leads)
+  google_place_id, rating, total_reviews, business_hours, place_types,
+  business_status, email, email_source, search_query, ai_score, ai_analysis,
+  email_verified, email_verified_at
+  // LinkedIn-specific (nullable for google leads)
+  linkedin_url, title, company, industry, company_size, headline,
+  connection_degree, enrichment_data
+  // Shared
+  business_name, address, phone, website, category, priority, status,
+  is_deleted, hubspot_company_id, hubspot_pushed_at, created_by,
+  discovered_at, enriched_at, re_enrich_after
+  ```
+- [ ] **`campaigns` table** — add `workspace_id`, `outreach_channel` ('email' | 'linkedin'), `require_approval`, `is_deleted`
+- [ ] **`campaign_steps` table** — port from ClearEdge Leads (step_order, step_type, delay_days, prompt_template, character_limit)
+- [ ] **`campaign_enrollments` table** — port from ClearEdge Leads, add `ooo_until` date
+- [ ] **`send_queue` table** — port + add `email_recipient`, `email_subject` for email channel
+- [ ] **`send_log` table** — port from ClearEdge Leads
+- [ ] **`engagement_events` table** — port from ClearEdge Leads
+- [ ] **`prompt_versions` table** — port from ClearEdge Leads migration 008
+- [ ] **`gbp_profiles` table** — keep from GBP app + add `workspace_id`
+- [ ] **`outreach_emails` table** — keep from GBP app, add `bounced_at`, `opened_at`, `clicked_at`
+- [ ] **`suppression_list` table** — new:
+  ```typescript
+  id, workspace_id FK, email, domain, reason ('unsubscribed'|'bounced'|'spam_report'|'manual'),
+  created_at
+  ```
+- [ ] **`audit_log` table** — new:
+  ```typescript
+  id, workspace_id FK, user_id FK, action, entity_type, entity_id,
+  metadata jsonb, created_at
+  ```
+- [ ] **`webhook_endpoints` table** — new:
+  ```typescript
+  id, workspace_id FK, url, events jsonb, secret, is_active, created_at
+  ```
+- [ ] **`notifications` table** — new:
+  ```typescript
+  id, workspace_id FK, user_id FK, type, title, body, link, read_at, created_at
+  ```
+- [ ] **`unipile_accounts` table** — new (Agency multi-account, Phase 9):
+  ```typescript
+  id, workspace_id FK, account_id, label, daily_sends_used, daily_limit, created_at
+  ```
+- [ ] **`app_config` table** — port from ClearEdge Leads + add `workspace_id`
+- [ ] **`sessions` table** — keep from GBP app unchanged
+- [ ] Run `npm run db:push` and verify all tables created
+
+### 1.3 Auth strategy
+
+- [ ] Keep Google OAuth from GBP app as primary login (`server/services/googleAuth.ts`)
+- [ ] On first login, auto-create a personal workspace for the user
+- [ ] Keep `fallbackAuth.ts` for local dev demo login
+- [ ] Port `middleware/auth.js` → `server/middleware/auth.ts`
+- [ ] Add `requireWorkspace` middleware stub — injects `req.workspace` (fully enforced Phase 9)
+- [ ] Port `middleware/validate.js` → `server/middleware/validate.ts` (Zod-based)
+- [ ] Port `middleware/error-handler.js` → `server/middleware/errorHandler.ts`
+
+---
+
+## Phase 2 — GBP Module (Google Lead Discovery + Email Outreach)
+
+**Timeline:** Week 3–4
+**Goal:** All GBP app features working in the new codebase with zero regressions.
+
+### 2.1 Backend services
+
+- [ ] Port `server/services/placesApi.ts` — no changes needed
+- [ ] Port `server/services/emailDiscovery.ts` — no changes needed
+- [ ] Port `server/services/email.ts` — keep for dev/local use only, replaced Phase 8
+- [ ] Port `server/services/googleAuth.ts` — no changes needed
+- [ ] Port `server/services/hubspot.ts` → `server/services/hubspotService.ts` (shared by both channels)
+- [ ] Port `server/lib/backgroundQueue.ts` — no changes needed
+- [ ] Update `server/storage.ts` — all queries scoped by `workspace_id`
+
+### 2.2 Frontend components
+
+- [ ] Port `client/src/components/LeadDiscovery.tsx` — update for unified schema
+- [ ] Port `client/src/components/LeadModal.tsx` — add `lead_source` badge ('Google' | 'LinkedIn')
+- [ ] Port `client/src/components/ProfileManagement.tsx` — no changes needed
+- [ ] Port `client/src/components/ProfileModal.tsx` — no changes needed
+- [ ] Port `client/src/components/Outreach.tsx` → `EmailOutreach.tsx`, scope to email channel
+- [ ] Port `client/src/components/OutreachPreviewModal.tsx` — no changes needed
+- [ ] Port `client/src/pages/Dashboard.tsx` — expand to 6 tabs (add LinkedIn, Queue)
+- [ ] Port `client/src/pages/Login.tsx` — no changes needed
+
+### 2.3 API routes (GBP)
+
+- [ ] `GET /api/auth/google` + callback
+- [ ] `GET /api/auth/me` + `POST /api/auth/logout`
+- [ ] `POST /api/leads/search` — Google Custom Search
+- [ ] `POST /api/leads/:id/enrich` — Places API enrichment
+- [ ] `POST /api/leads/:id/score` — Claude AI analysis
+- [ ] `POST /api/leads/:id/email` — generate + send outreach email
+- [ ] `GET/POST/PATCH /api/leads` — CRUD (workspace-scoped)
+- [ ] `GET/POST/PATCH/DELETE /api/profiles` — GBP profile management
+- [ ] `GET/POST /api/campaigns` — email campaigns
+- [ ] `POST /api/leads/:id/hubspot` — push to HubSpot
+- [ ] `GET /api/analytics` — pipeline metrics
+
+---
+
+## Phase 3 — LinkedIn Module (Unipile Search + Multi-Step Campaigns)
+
+**Timeline:** Week 5–7
+**Goal:** Full LinkedIn prospecting, campaign management, queue review, and inbox sync as React components.
+
+### 3.1 Backend services (ported from ClearEdge Leads)
+
+- [ ] Port `api/linkedin-search.js` → `server/services/linkedinSearchService.ts`
+- [ ] Port `api/unipile-dispatch.js` → `server/services/unipileDispatchService.ts`
+- [ ] Port `api/sync-unipile-inbox.js` → `server/services/inboxSyncService.ts`
+- [ ] Port `api/queue-management.js` → `server/services/queueService.ts`
+- [ ] Port `api/trigger-queue-generation.js` → `server/services/queueGenerationService.ts`
+- [ ] Port `api/enrich-leads.js` → extend enrichment service for LinkedIn leads
+- [ ] Port `api/lead-scoring.js` → extend AI service
+- [ ] Port `lib/linkedin-limiter.js` → `server/lib/linkedinLimiter.ts`
+- [ ] Port `lib/retry.js` → `server/lib/retry.ts`
+- [ ] Port `lib/api-tracker.js` → `server/lib/apiTracker.ts`
+- [ ] Port `lib/logger.js` → `server/lib/logger.ts`
+
+### 3.2 API routes (LinkedIn)
+
+- [ ] `POST /api/linkedin/search`
+- [ ] `POST /api/linkedin/search/save`
+- [ ] `POST /api/campaigns/:id/enroll`
+- [ ] `POST /api/messages/generate`
+- [ ] `POST /api/messages/trigger-batch`
+- [ ] `POST /api/queue/dispatch`
+- [ ] `POST /api/inbox/sync`
+- [ ] `GET /api/queue`
+- [ ] `PATCH /api/queue/:id`
+- [ ] `GET/POST/DELETE /api/campaigns`
+- [ ] `GET/POST /api/campaign-steps`
+
+### 3.3 Frontend components (new — replaces vanilla JS)
+
+- [ ] **`LinkedInLeads.tsx`** — search form, results table, save + enroll flow
+- [ ] **`CampaignBuilder.tsx`** — wizard: name/tone/limits → steps → activate; campaign list
+- [ ] **`SendQueue.tsx`** — Pending | Approved | Sent | Failed tabs; per-item edit + approve/skip; bulk actions
+- [ ] **`Inbox.tsx`** — sync button, reply list with classification badge, lead modal on click
+
+### 3.4 n8n workflow update
+
+- [ ] Copy `n8n/linkedin-queue-workflow.json`, update webhook URLs and credentials
+- [ ] Add error branch with Slack notification on failure
+- [ ] Document import instructions in README
+
+---
+
+## Phase 4 — AI Engine Consolidation
+
+**Timeline:** Week 8–9
+**Goal:** Single AI service with A/B prompt testing, RAG, and i18n across both channels.
+
+### 4.1 Core AI engine
+
+- [ ] Port `lib/prompt-engine.js` → `server/services/promptEngine.ts`
+  - `selectPromptVersion()`, `recordReplyForVersion()`, `interpolatePrompt()`, `buildEnhancedPrompt()`
+- [ ] Port `lib/rag-engine.js` → `server/services/ragEngine.ts`
+- [ ] Port `lib/language-detect.js` → `server/lib/languageDetect.ts`
+
+### 4.2 Upgrade AI service
+
+- [ ] Add `generateLinkedInMessage(lead, step, tone)` using `buildEnhancedPrompt()`
+- [ ] Upgrade `generateEmail(lead)` to use prompt engine (A/B for email templates)
+- [ ] Add `trackApiUsage(call)` — calls `apiTracker.ts`
+- [ ] Verify `withRetry()` on all Claude API calls
+
+### 4.3 Prompt version management
+
+- [ ] `GET/POST/PATCH /api/prompt-versions` routes
+- [ ] PromptVersions panel in CampaignBuilder.tsx with reply rate per variant
+
+---
+
+## Phase 5 — Analytics & Reporting
+
+**Timeline:** Week 10–11
+**Goal:** Unified metrics dashboard across both channels with A/B reporting and cost tracking.
+
+### 5.1 Backend analytics service
+
+- [ ] Port `api/analytics.js` → `server/services/analyticsService.ts` — pipeline metrics, campaign stats, A/B report, token cost
+- [ ] Port `api/optimization.js` → `server/services/optimizationService.ts` — auto-pause, prompt suggestions
+- [ ] `GET /api/analytics/overview`, `/campaigns/:id`, `/ab-report`
+
+### 5.2 Frontend analytics components
+
+- [ ] Extend `Analytics.tsx` — Google pipeline + LinkedIn pipeline + cross-channel view
+- [ ] Build `Reports.tsx` — campaign comparison, A/B leaderboard, weekly volume chart, AI cost dashboard
+- [ ] CSV export for leads and campaign results
+
+---
+
+## Phase 6 — Foundation Hardening & CI/CD
+
+**Timeline:** Week 12–13
+**Goal:** Test coverage, deployment-ready, all settings configurable from UI.
+
+### 6.1 Settings page
+
+Build `Settings.tsx`:
+
+- [ ] Google OAuth status + reconnect
+- [ ] Unipile account ID + connection status
+- [ ] SendGrid API key + from-address field (Phase 8 prereq)
+- [ ] HubSpot API key
+- [ ] Calendly / Cal.com scheduling link
+- [ ] Daily LinkedIn send limits
+- [ ] LinkedIn compliance mode toggle
+- [ ] Claude API usage this month
+
+### 6.2 Testing
+
+- [ ] Port all `__tests__/` from ClearEdge Leads → TypeScript
+- [ ] Add `api/leads.test.ts`, `api/campaigns.test.ts`, `api/queue.test.ts`
+- [ ] Add `api/suppression.test.ts` stub
+
+### 6.3 CI/CD
+
+- [ ] Update `.github/workflows/ci.yml`: lint → typecheck → test → build
+- [ ] Configure Railway: env vars, production `APP_URL`, Google OAuth redirect URI
+
+### 6.4 Final pass
+
+- [ ] Replace all `console.log` with structured logger
+- [ ] Zod validation on all API endpoints
+- [ ] `requireAuth` audit on every non-public route
+- [ ] Sanitize all lead fields before AI prompt injection
+- [ ] `express-rate-limit` on LinkedIn and AI endpoints
+
+---
+
+## Phase 7 — Legal & Compliance
+
+**Timeline:** Week 14
+**Severity:** Blockers — cannot operate commercially without these.
+**Goal:** CAN-SPAM and GDPR compliant email. LinkedIn ToS-safe send behavior. Data deletion capability.
+
+### 7.1 CAN-SPAM / GDPR email compliance
+
+- [ ] Add physical mailing address footer to every outbound email template
+- [ ] Add one-click unsubscribe link to every outbound email
+  - Generate signed unsubscribe token per recipient
+  - `GET /unsubscribe/:token` — adds email to `suppression_list`, returns confirmation page (no login required)
+  - `List-Unsubscribe` header on all outbound emails
+- [ ] Pre-send suppression check — query `suppression_list` by email AND domain before every send; abort if found
+
+### 7.2 Suppression list management
+
+- [ ] `GET/POST/DELETE /api/suppression` routes
+- [ ] `POST /api/suppression/import` — bulk import from CSV
+- [ ] Domain suppression — suppressing `@domain.com` blocks all outreach to that domain (competitor exclusion)
+- [ ] Build `SuppressionList.tsx` in Settings — view, add, remove entries with domain/email toggle
+
+### 7.3 GDPR data deletion (right to erasure)
+
+- [ ] `DELETE /api/leads/:id/gdpr` — hard delete lead + all send_queue, send_log, engagement_events, outreach_emails rows
+- [ ] Confirmation modal in LeadModal.tsx: "Permanently delete all data for this contact?"
+- [ ] Log all GDPR deletions to `audit_log` with `action = 'gdpr_delete'`
+- [ ] Document data retention policy in README
+
+### 7.4 Privacy policy & terms pages
+
+- [ ] `/privacy` and `/terms` static pages
+- [ ] Link both from login page footer
+- [ ] Acceptance checkbox on first workspace setup: "I agree to the Terms of Service"
+
+### 7.5 LinkedIn ToS compliance hardening
+
+- [ ] Enforce randomized human-like delays between LinkedIn actions (1–3s jitter minimum)
+- [ ] Hard cap: max 20 connection requests/day, max 50 messages/day per Unipile account (configurable but capped in linkedinLimiter)
+- [ ] LinkedIn compliance mode ON by default — explicit opt-out in Settings
+- [ ] Log every LinkedIn action to `audit_log`
+- [ ] Warning banner in Dashboard when daily limits are >80% consumed
+
+---
+
+## Phase 8 — Email Infrastructure
+
+**Timeline:** Week 15–16
+**Severity:** Blockers — Gmail SMTP breaks at real send volume and damages domain reputation.
+**Goal:** Production-grade email with deliverability, tracking, bounce management, and OOO detection.
+
+### 8.1 Replace Gmail SMTP with SendGrid
+
+- [ ] Install `@sendgrid/mail`
+- [ ] Create `server/services/emailService.ts` — replaces `email.ts`
+  - `sendEmail(to, subject, html, options)` — wraps SendGrid client
+  - Pre-send suppression check before every call
+  - Falls back to Gmail SMTP if `NODE_ENV !== 'production'`
+- [ ] Migrate all `email.ts` call sites to `emailService.ts`
+- [ ] Add SendGrid settings fields to Settings.tsx
+
+### 8.2 Sending domain & DNS authentication
+
+- [ ] Document DNS record setup in README: SPF, DKIM CNAME records, DMARC policy
+- [ ] Verify sending domain in SendGrid before any production sends
+- [ ] Domain verification status indicator in Settings.tsx
+
+### 8.3 Bounce handling
+
+- [ ] SendGrid inbound webhook: `POST /api/webhooks/sendgrid`
+  - Verify signature using `SENDGRID_WEBHOOK_SECRET`
+  - `bounce` → add to `suppression_list` (`reason = 'bounced'`), update lead `status = 'bounced'`
+  - `spamreport` → add to suppression list (`reason = 'spam_report'`)
+  - `unsubscribe` → add to suppression list (backup to one-click)
+  - `open` → update `outreach_emails.opened_at`, lead `status = 'opened'`
+  - `click` → update `outreach_emails.clicked_at`
+- [ ] Hard bounce = permanent suppression; soft bounce = retry once then suppress
+
+### 8.4 Open + click tracking
+
+- [ ] Open tracking pixel: `<img src="${APP_URL}/track/open/${emailId}" width="1" height="1">`
+- [ ] `GET /track/open/:emailId` — updates `opened_at`, returns 1x1 transparent GIF
+- [ ] Enable SendGrid click tracking in dashboard settings
+- [ ] Surface open/click status in EmailOutreach.tsx — opened/clicked badges per email
+
+### 8.5 Email pre-flight verification
+
+- [ ] `POST /api/leads/:id/verify-email` — Hunter.io Email Verifier API
+  - Returns `deliverable` | `risky` | `undeliverable`
+  - Store in `leads.email_verified`
+  - Block sends to `undeliverable` automatically
+- [ ] Email verification badge in LeadModal.tsx
+- [ ] Bulk verify button in LeadDiscovery.tsx
+
+### 8.6 Out-of-office detection
+
+- [ ] In `inboxSyncService.ts`, detect OOO keywords in replies: "out of office", "on vacation", "away until", "auto-reply"
+- [ ] If OOO: pause campaign enrollment, set `campaign_enrollments.ooo_until = now() + 14 days`
+- [ ] Log to `engagement_events` with `event_type = 'out_of_office'`
+- [ ] Queue generation skips enrollments where `ooo_until > now()`
+
+### 8.7 Email warm-up guidance
+
+- [ ] Warm-up checklist in Settings.tsx (educational):
+  - Week 1: max 20/day → Week 2: 50 → Week 3: 100 → Week 4+: 300
+- [ ] Enforce `daily_email_limit` from workspace settings in `emailService`
+- [ ] Show current day email count vs limit in Analytics.tsx header
+
+---
+
+## Phase 9 — Multi-Tenancy & Billing
+
+**Timeline:** Week 17–19
+**Severity:** Required to charge customers — currently single-user.
+**Goal:** Workspace model with RBAC, Stripe subscription billing, usage metering, and multi-account LinkedIn.
+
+### 9.1 Workspace model activation
+
+- [ ] Activate `workspaces` table (stubbed in Phase 1)
+- [ ] Add `workspace_id` WHERE clause to every read/write in `server/storage.ts`
+- [ ] `requireWorkspace` middleware — resolves workspace from session, attaches to `req.workspace`
+- [ ] `GET /api/workspace` — get current workspace settings
+- [ ] `PATCH /api/workspace` — update name, settings
+- [ ] `GET /api/workspace/usage` — current month sends, AI tokens
+
+### 9.2 Role-based access
+
+- [ ] User roles: `admin` | `member`
+- [ ] `POST /api/workspace/invite` — send email invitation (admin only)
+- [ ] `GET /api/workspace/members` — list members + roles
+- [ ] `PATCH /api/workspace/members/:id` — change role (admin only)
+- [ ] `DELETE /api/workspace/members/:id` — remove member (admin only)
+- [ ] `requireRole('admin')` middleware on destructive operations
+- [ ] Members panel in Settings.tsx
+
+### 9.3 Stripe subscription billing
+
+- [ ] Install `stripe` SDK
+- [ ] Create `server/services/billingService.ts`:
+  - `createCheckoutSession(workspaceId, priceId)`, `createPortalSession(workspaceId)`, `handleWebhook(event)`
+- [ ] `POST /api/webhooks/stripe` — handle all Stripe events:
+  - `checkout.session.completed` → activate subscription, update workspace `plan`
+  - `customer.subscription.updated` → update plan + limits
+  - `customer.subscription.deleted` → downgrade to free
+  - `invoice.payment_failed` → payment failure email + warning banner
+- [ ] Plan tiers:
+
+  | Plan | Monthly price | Email sends/mo | LinkedIn sends/mo | Members |
+  |------|-------------|---------------|------------------|---------|
+  | Solo | $49 | 1,000 | 500 | 1 |
+  | Team | $149 | 5,000 | 2,000 | 5 |
+  | Agency | $399 | 25,000 | 10,000 | Unlimited |
+
+- [ ] `GET /api/billing/checkout` and `/api/billing/portal`
+- [ ] Billing panel in Settings.tsx — plan badge, usage bars, upgrade/manage button
+
+### 9.4 Usage enforcement
+
+- [ ] Before every email send — check `monthly_email_sends_used < plan_limit`; return 402 if over
+- [ ] Before every LinkedIn dispatch — check `monthly_linkedin_sends_used < plan_limit`
+- [ ] Increment counters on successful dispatch (not queue insert)
+- [ ] Reset counters on 1st of month via n8n scheduled workflow
+- [ ] Soft warning at 80% — yellow header banner; hard block at 100% with upgrade CTA
+
+### 9.5 Multi-account LinkedIn (Agency plan)
+
+- [ ] Activate `unipile_accounts` table (stubbed in Phase 1)
+- [ ] Campaigns assignable to specific Unipile account
+- [ ] `linkedinLimiter` enforces per-account limits
+- [ ] Account health display per Unipile account in Settings.tsx
+
+---
+
+## Phase 10 — Data Quality & Enrichment
+
+**Timeline:** Week 20–21
+**Goal:** Clean, deduplicated leads with verified contact data. Bulk import. Scheduled re-enrichment.
+
+### 10.1 Deduplication
+
+- [ ] On lead save, check for duplicate by email OR linkedin_url OR (business_name + domain)
+- [ ] Duplicate found → merge modal: "This contact already exists. Merge or create duplicate?"
+- [ ] Merge logic: prefer non-null fields, newer enrichment, combine notes
+- [ ] `POST /api/leads/deduplicate` — bulk scan + merge for workspace
+- [ ] Duplicate count badge in Settings.tsx with one-click bulk merge
+
+### 10.2 Company / domain suppression
+
+- [ ] Domain suppression blocks leads from that domain across all campaigns (not just email)
+- [ ] "Add to suppression" in LeadModal.tsx dropdown — suppresses by email domain
+- [ ] `POST /api/suppression/import-domains` — paste newline-separated domain list
+
+### 10.3 CSV lead import
+
+- [ ] `POST /api/leads/import` — CSV upload, required: `full_name` or `business_name`
+  - Validates rows, skips suppressed emails/domains, deduplication per row
+  - Returns import summary: imported / skipped / duplicates / suppressed
+- [ ] Build `LeadImportModal.tsx` — drag-and-drop upload with column mapping UI
+- [ ] Download CSV template button
+
+### 10.4 Apollo.io / Hunter.io enrichment
+
+- [ ] Create `server/services/enrichmentService.ts`
+  - `enrichFromApollo(lead)` — company size, technologies, funding, employee count
+  - `enrichFromHunter(domain)` — find emails for a domain
+  - `verifyEmailHunter(email)` — deliverability check
+  - Fallback: Apollo → Hunter → existing `emailDiscovery.ts` website scraping
+- [ ] Store results in `leads.enrichment_data` jsonb
+- [ ] "Enrich with Apollo" button in LeadModal.tsx
+- [ ] Bulk enrich selected leads in LeadDiscovery.tsx
+- [ ] Track enrichment API cost per workspace in `apiTracker`
+
+### 10.5 Scheduled re-enrichment
+
+- [ ] `re_enrich_after` column in `leads` — set to `now() + 90 days` on enrich
+- [ ] n8n daily workflow: find leads where `re_enrich_after < now()` and `status != 'converted'`, re-run enrichment
+- [ ] Re-enrichment settings in Settings.tsx: toggle on/off, interval (30/60/90 days)
+
+---
+
+## Phase 11 — Real-Time & Notifications
+
+**Timeline:** Week 22
+**Goal:** Live updates without page refresh. Alerts for replies, campaign completions, and system errors.
+
+### 11.1 Server-Sent Events
+
+- [ ] `GET /api/events` — authenticated SSE endpoint, workspace-scoped, per-user connection
+- [ ] Create `server/lib/eventEmitter.ts` — internal pub/sub keyed by workspace ID
+- [ ] Services emit events: `queue_updated`, `reply_received`, `connection_accepted`, `campaign_completed`, `limit_warning`
+
+### 11.2 Frontend real-time integration
+
+- [ ] `client/src/hooks/useSSE.ts` — SSE connection hook with auto-reconnect
+- [ ] `SendQueue.tsx` — queue count updates live
+- [ ] `Inbox.tsx` — reply badge pulses on `reply_received`
+- [ ] Dashboard header — live "X items pending approval" count
+- [ ] Toast notification on `reply_received`
+
+### 11.3 In-app notification center
+
+- [ ] `GET /api/notifications` — unread notifications for current user
+- [ ] `PATCH /api/notifications/:id/read` and `/read-all`
+- [ ] Build `NotificationBell.tsx` — bell icon with unread count badge + dropdown
+
+### 11.4 Slack + email daily digest
+
+- [ ] Add `slack_webhook_url` to workspace `app_config`
+- [ ] n8n 8am daily workflow: replies, connections, pending queue, campaigns at limit → Slack or email
+- [ ] Slack integration section in Settings.tsx — webhook URL + test button
+
+### 11.5 n8n error alerting
+
+- [ ] Error branch in all n8n workflows → Slack message (workflow name, failed node, error, timestamp)
+- [ ] `POST /api/webhooks/n8n-error` — logs to `audit_log`
+- [ ] Last n8n run timestamp + error state in Settings.tsx → Automation section
+
+---
+
+## Phase 12 — Product UX Completeness
+
+**Timeline:** Week 23–26
+**Goal:** Table-stakes UX for a paid SaaS product. Onboarding, empty states, mobile, audit trail, webhooks.
+
+### 12.1 Onboarding flow
+
+- [ ] Build `Onboarding.tsx` — shown to new workspaces before Dashboard
+  - Step 1: Connect Gmail / verify sending domain
+  - Step 2: Connect LinkedIn via Unipile
+  - Step 3: Create first campaign (pre-filled example)
+  - Step 4: Import or find first leads
+- [ ] Store progress in `app_config` key `onboarding_step`; allow skip at any point
+- [ ] "Complete setup" prompt in Settings.tsx until onboarding finished
+- [ ] Progress indicator in top nav during onboarding
+
+### 12.2 Empty states
+
+Every table and list must have an actionable zero-state (not a blank screen):
+
+- [ ] `LeadDiscovery.tsx` — "No leads yet. Search for businesses above to get started."
+- [ ] `LinkedInLeads.tsx` — "No LinkedIn leads yet. Search for prospects to begin outreach."
+- [ ] `CampaignBuilder.tsx` — "No campaigns. Create your first campaign to start reaching out."
+- [ ] `SendQueue.tsx` — "Queue is empty. Generate messages for active enrollments to fill it."
+- [ ] `Inbox.tsx` — "No replies yet. Sync your inbox to check for responses."
+- [ ] `Analytics.tsx` — "No data yet. Send your first messages to see performance metrics."
+- [ ] All empty states include a CTA button routing to the relevant action
+
+### 12.3 Mobile-responsive layout
+
+- [ ] Responsive audit of all components at 375px, 768px, 1024px
+- [ ] Dashboard tab bar scrollable horizontal strip on mobile
+- [ ] Lead table collapses to card list on mobile
+- [ ] SendQueue approve/skip accessible without horizontal scroll on mobile
+- [ ] Settings page single-column on mobile
+- [ ] All Chart.js charts verify `responsive: true`
+
+### 12.4 Audit log
+
+- [ ] Activate `audit_log` writes on all significant actions:
+  - `lead_created`, `lead_deleted`, `lead_gdpr_deleted`
+  - `campaign_created`, `campaign_activated`, `campaign_paused`
+  - `message_sent`, `message_dispatched_linkedin`
+  - `member_invited`, `member_role_changed`, `member_removed`
+  - `billing_plan_changed`
+  - `suppression_added`, `suppression_removed`
+  - `api_key_changed`
+- [ ] `GET /api/audit-log` — filterable by action, user, date range (admin only)
+- [ ] Build `AuditLog.tsx` in Settings.tsx — scrollable log with filters
+
+### 12.5 Outbound webhooks
+
+- [ ] `POST/DELETE /api/webhooks/endpoints` — register/remove webhook URLs
+- [ ] `POST /api/webhooks/endpoints/:id/test` — send test payload
+- [ ] `server/services/webhookDeliveryService.ts`:
+  - Sign payloads with HMAC-SHA256 per-endpoint secret
+  - 3-attempt retry with exponential backoff
+  - Log delivery status to `audit_log`
+- [ ] Supported events: `lead.reply_received`, `lead.connection_accepted`, `lead.status_changed`, `campaign.completed`, `email.bounced`
+- [ ] Webhooks panel in Settings.tsx — add endpoint, select events, delivery history
+
+### 12.6 Meeting booking tracking
+
+- [ ] `POST /api/webhooks/calendly` and `POST /api/webhooks/calcom`
+  - On booking created: find lead by email, `status = 'meeting_booked'`
+  - Log to `engagement_events` with `event_type = 'meeting_booked'`
+  - Increment campaign `total_meetings`
+- [ ] Meeting booked count in Analytics.tsx pipeline funnel
+
+---
+
+## Key Design Decisions
+
+### `_source/` and `_reference/` folder strategy
+The two source codebases land in `_source/` (gitignored snapshots, extracted from the zips the user provides) and `_reference/` (tracked in git, containing the ClearEdge Leads JavaScript files that will be ported phase by phase). The GBP project is the base — its contents are copied directly into the workspace root in Phase 1.1. ClearEdge Leads is not merged in at once; each `.js` file in `_reference/` is rewritten as TypeScript and moved into `server/services/` or `server/lib/` at the moment its owning phase (2–5) reaches it. This keeps `npm run check` passing at every commit and avoids a week-long .js → .ts conversion sprint at the start.
+
+### Workspace-first from day one
+`workspace_id` is added to every table in Phase 1 even though multi-tenancy isn't activated until Phase 9. All storage queries scope by `workspace_id` from the first commit. This avoids a painful migration later.
+
+### Unified lead model
+One `leads` table with a `lead_source` discriminator. Google-specific and LinkedIn-specific columns are nullable. Campaigns can enroll any lead regardless of origin, enabling cross-channel sequences (discover via Google → follow up on LinkedIn).
+
+### SendGrid over Gmail SMTP
+Gmail is acceptable for local dev only. SendGrid provides bounce webhooks, open/click tracking, dedicated sending reputation, and limits that scale. The `emailService.ts` abstraction makes this a one-day swap.
+
+### Suppression list is workspace-global
+Suppression applies across all campaigns in a workspace. Once someone unsubscribes or bounces, they are permanently blocked from all outreach from that workspace. This is legally required under CAN-SPAM and GDPR.
+
+### Stripe workspace billing, not per-user
+Billing attaches to the workspace. Team members share the workspace's send limits. The workspace schema maps cleanly to Stripe customer + subscription.
+
+### Outreach channel on campaigns
+Each campaign has an `outreach_channel` ('email' | 'linkedin'). Email campaigns use the simple one-step email flow. LinkedIn campaigns use the multi-step enrollment + queue system. The prompt engine and A/B testing apply to both.
+
+---
+
+## File Structure (target)
+
+```
+server/
+  index.ts
+  routes.ts
+  storage.ts
+  db.ts
+  fallbackAuth.ts
+  middleware/
+    auth.ts
+    errorHandler.ts
+    validate.ts
+    requireRole.ts              # Phase 9
+    requireWorkspace.ts         # Phase 9
+  lib/
+    backgroundQueue.ts
+    linkedinLimiter.ts
+    retry.ts
+    apiTracker.ts
+    logger.ts
+    languageDetect.ts
+    eventEmitter.ts             # Phase 11
+  services/
+    aiService.ts
+    promptEngine.ts
+    ragEngine.ts
+    googleAuth.ts
+    placesApi.ts
+    emailDiscovery.ts
+    emailService.ts             # Phase 8 — replaces email.ts
+    hubspotService.ts
+    linkedinSearchService.ts
+    unipileDispatchService.ts
+    inboxSyncService.ts
+    queueService.ts
+    queueGenerationService.ts
+    analyticsService.ts
+    optimizationService.ts
+    enrichmentService.ts        # Phase 10
+    billingService.ts           # Phase 9
+    suppressionService.ts       # Phase 7
+    webhookDeliveryService.ts   # Phase 12
+
+client/src/
+  App.tsx
+  pages/
+    Dashboard.tsx
+    Login.tsx
+    Onboarding.tsx              # Phase 12
+    not-found.tsx
+  components/
+    LeadDiscovery.tsx
+    LinkedInLeads.tsx
+    LeadModal.tsx
+    LeadImportModal.tsx         # Phase 10
+    CampaignBuilder.tsx
+    SendQueue.tsx
+    Inbox.tsx
+    EmailOutreach.tsx
+    ProfileManagement.tsx
+    ProfileModal.tsx
+    Analytics.tsx
+    Reports.tsx
+    Settings.tsx
+    SuppressionList.tsx         # Phase 7
+    NotificationBell.tsx        # Phase 11
+    AuditLog.tsx                # Phase 12
+  hooks/
+    useSSE.ts                   # Phase 11
+    useAuth.ts
+    use-toast.ts
+    use-mobile.tsx
+
+shared/
+  schema.ts
+
+__tests__/
+  (all ported + new tests per phase)
+
+n8n/
+  linkedin-queue-workflow.json
+  daily-digest-workflow.json    # Phase 11
+  re-enrichment-workflow.json   # Phase 10
+  usage-reset-workflow.json     # Phase 9
+
+public/
+  privacy.html                  # Phase 7
+  terms.html                    # Phase 7
+
+_reference/                     # ClearEdge Leads JS, ported phase by phase
+  clearedge-lib/                # → server/lib + server/services (Phase 3-5)
+  clearedge-middleware/         # → server/middleware (Phase 1.3)
+  clearedge-api/                # → server/routes + server/services (Phase 3)
+  clearedge-tests/              # → __tests__ (Phase 6)
+  clearedge-migrations/         # reference for shared/schema.ts (Phase 1.2)
+
+_source/                        # gitignored — original zip snapshots
+```
+
+---
+
+## Success Metrics
+
+| Metric | After phase 6 | After phase 9 | After phase 12 |
+|--------|-------------|--------------|---------------|
+| Google leads | Working | Workspace-scoped | With deduplication |
+| LinkedIn sends/day | 50–100 via queue | Per-account limits | Compliance-safe |
+| Email deliverability | Gmail dev only | SendGrid + domain auth | Bounce rate < 2% |
+| Reply rate | Baseline tracked | 15%+ A/B optimized | 20%+ with RAG |
+| Legal compliance | None | Unsubscribe + deletion | Full CAN-SPAM + GDPR |
+| Paying customers | Cannot bill | Stripe live | Multi-workspace |
+| Team support | Single user | 5-member teams | Agency multi-account |
+| Notifications | None | Slack digest | Live SSE + in-app |
+| CI / deployment | Green CI | Railway production | Monitoring + alerts |
