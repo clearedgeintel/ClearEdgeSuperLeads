@@ -573,7 +573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/outreach-campaigns', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
-      const campaigns = await storage.getOutreachCampaigns(user.id);
+      const campaigns = await storage.getCampaigns(user.id);
       res.json(campaigns);
     } catch (error: any) {
       console.error('Get outreach campaigns error:', error);
@@ -588,7 +588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const [leads, campaigns] = await Promise.all([
         storage.getLeads(user.id),
-        storage.getOutreachCampaigns(user.id)
+        storage.getCampaigns(user.id)
       ]);
 
       const summary = {

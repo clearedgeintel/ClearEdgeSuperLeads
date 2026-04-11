@@ -133,28 +133,32 @@ RATE_LIMIT_MAX=100
 - [x] Copy `n8n/linkedin-queue-workflow.json` into project root `n8n/`
 - [x] Rename project in `package.json` → `clearedge-outreach`
 - [x] Exclude `_source/` and `_reference/` from `tsconfig.json` so JS reference files don't break typecheck
-- [ ] Add ESLint + Prettier config from ClearEdge Leads, upgraded for TypeScript (`@typescript-eslint/*`)
-- [ ] Add Husky pre-commit hooks (`npm run lint && npm run check`)
-- [ ] Set up Jest config for TypeScript (`jest.config.ts` with `ts-jest` preset, no coverage threshold until Phase 6)
-- [ ] Update `README.md` with full architecture overview
-- [ ] Update `.gitignore` (`_source/`, source zips, `.env`, `coverage/`)
-- [ ] Verify skeleton compiles clean: `npm install && npm run check && npm run lint && npm run build`
-- [ ] `git init` + initial commit
+- [x] Add ESLint + Prettier config from ClearEdge Leads, upgraded for TypeScript (`@typescript-eslint/*`, `eslint-plugin-react-hooks`)
+- [x] Add Husky pre-commit hooks (`npm run lint && npm run check`)
+- [x] Set up Jest config for TypeScript (`jest.config.ts` with `ts-jest/presets/default-esm`, no coverage threshold until Phase 6)
+- [x] Update `README.md` with full architecture overview
+- [x] Update `.gitignore` (`_source/`, source zips, `.env`, `coverage/`)
+- [x] Verify skeleton compiles clean: `npm run check` ✓, `npm run lint` ✓ (0 errors, 111 pre-existing GBP warnings), `npm run build` ✓
+- [x] `git init` + initial commit (`3e87f86`)
+
+> **Phase 1.1 status:** Complete as of 2026-04-11. The skeleton passes typecheck, lint (0 errors), and build. Pinned versions: ESLint `^8.57.1`, Prettier `^3.8.2`, `@typescript-eslint/*` `^8.58.1`, Jest `^30.3.0`, ts-jest `^29.4.9`, Husky `^9.1.7`, `eslint-plugin-react-hooks` `^4.6.2`. Note: ESLint 10 was initially installed but is incompatible with `.eslintrc.json` (flat-config only) and `@typescript-eslint` v8 — pinned to v8.57 as the last stable combo with legacy config support.
 
 > **Note on JS → TS conversion:** The roadmap originally called for a bulk `.js → .ts` stub rename in this phase. We deferred that. Each ClearEdge Leads file is converted to TypeScript at the moment it is ported into `server/services/` or `server/lib/` during its owning phase (2–5). Files sit untouched in `_reference/` until then. This keeps `npm run check` green throughout the port.
+
+> **Pre-existing lint debt:** 111 warnings remain from GBP source code (mostly `@typescript-eslint/no-explicit-any`, a handful of unused vars, and `eqeqeq`/`prefer-const` downgraded to warn for the scaffold). These are not introduced by our work and should be cleaned up opportunistically during Phase 2 porting or in Phase 6's "Final pass."
 
 ### 1.2 Unified Drizzle schema
 
 Create `shared/schema.ts` with all table definitions:
 
-- [ ] **`workspaces` table** — top-level tenant (stubbed now, activated Phase 9):
+- [x] **`workspaces` table** — top-level tenant (stubbed now, activated Phase 9):
   ```typescript
   id, name, slug, plan, stripe_customer_id, stripe_subscription_id,
   monthly_email_sends_used, monthly_linkedin_sends_used, daily_email_limit,
   created_at
   ```
-- [ ] **`users` table** — add `workspace_id` FK + `role` ('admin' | 'member'), keep Google OAuth fields
-- [ ] **`leads` table** — unified with `lead_source` discriminator + `workspace_id`:
+- [x] **`users` table** — add `workspace_id` FK + `role` ('admin' | 'member'), keep Google OAuth fields
+- [x] **`leads` table** — unified with `lead_source` discriminator + `workspace_id`:
   ```typescript
   lead_source: varchar  // 'google' | 'linkedin'
   workspace_id: varchar FK
@@ -170,40 +174,46 @@ Create `shared/schema.ts` with all table definitions:
   is_deleted, hubspot_company_id, hubspot_pushed_at, created_by,
   discovered_at, enriched_at, re_enrich_after
   ```
-- [ ] **`campaigns` table** — add `workspace_id`, `outreach_channel` ('email' | 'linkedin'), `require_approval`, `is_deleted`
-- [ ] **`campaign_steps` table** — port from ClearEdge Leads (step_order, step_type, delay_days, prompt_template, character_limit)
-- [ ] **`campaign_enrollments` table** — port from ClearEdge Leads, add `ooo_until` date
-- [ ] **`send_queue` table** — port + add `email_recipient`, `email_subject` for email channel
-- [ ] **`send_log` table** — port from ClearEdge Leads
-- [ ] **`engagement_events` table** — port from ClearEdge Leads
-- [ ] **`prompt_versions` table** — port from ClearEdge Leads migration 008
-- [ ] **`gbp_profiles` table** — keep from GBP app + add `workspace_id`
-- [ ] **`outreach_emails` table** — keep from GBP app, add `bounced_at`, `opened_at`, `clicked_at`
-- [ ] **`suppression_list` table** — new:
+- [x] **`campaigns` table** — merged from GBP `outreach_campaigns` + ClearEdge Leads `campaigns`. Added `workspace_id`, `outreach_channel`, `require_approval`, `is_deleted`. Rename touched `server/storage.ts` and `server/routes.ts`.
+- [x] **`campaign_steps` table** — port from ClearEdge Leads (step_order, step_type, delay_days, prompt_template, character_limit)
+- [x] **`campaign_enrollments` table** — port from ClearEdge Leads, add `ooo_until` date
+- [x] **`send_queue` table** — port + add `channel`, `email_recipient`, `email_subject` for email channel
+- [x] **`send_log` table** — port from ClearEdge Leads, add `channel` + `workspace_id`
+- [x] **`engagement_events` table** — port from ClearEdge Leads (includes `sentiment` column from migration 005)
+- [x] **`prompt_versions` table** — port from ClearEdge Leads migration 005
+- [x] **`gbp_profiles` table** — keep from GBP app + add `workspace_id`
+- [x] **`outreach_emails` table** — keep from GBP app, add `bounced_at`, `clicked_at`, `workspace_id`, status enum includes `bounced`/`spam`
+- [x] **`suppression_list` table** — new:
   ```typescript
   id, workspace_id FK, email, domain, reason ('unsubscribed'|'bounced'|'spam_report'|'manual'),
   created_at
   ```
-- [ ] **`audit_log` table** — new:
+- [x] **`audit_log` table** — new:
   ```typescript
   id, workspace_id FK, user_id FK, action, entity_type, entity_id,
   metadata jsonb, created_at
   ```
-- [ ] **`webhook_endpoints` table** — new:
+- [x] **`webhook_endpoints` table** — new:
   ```typescript
   id, workspace_id FK, url, events jsonb, secret, is_active, created_at
   ```
-- [ ] **`notifications` table** — new:
+- [x] **`notifications` table** — new:
   ```typescript
   id, workspace_id FK, user_id FK, type, title, body, link, read_at, created_at
   ```
-- [ ] **`unipile_accounts` table** — new (Agency multi-account, Phase 9):
+- [x] **`unipile_accounts` table** — new (Agency multi-account, Phase 9):
   ```typescript
   id, workspace_id FK, account_id, label, daily_sends_used, daily_limit, created_at
   ```
-- [ ] **`app_config` table** — port from ClearEdge Leads + add `workspace_id`
-- [ ] **`sessions` table** — keep from GBP app unchanged
-- [ ] Run `npm run db:push` and verify all tables created
+- [x] **`app_config` table** — port from ClearEdge Leads + add `workspace_id` (composite unique index on workspace_id+key)
+- [x] **`sessions` table** — keep from GBP app unchanged
+- [x] Run `npm run db:push` and verify all tables created (19 tables live in Supabase as of 2026-04-11)
+
+> **Phase 1.2 status:** Complete as of 2026-04-11. All 16 application tables defined in [shared/schema.ts](shared/schema.ts), typecheck passes, and `db:push` successfully synced the schema to the configured Supabase DB. The `workspaces` table is stubbed (nullable FK everywhere) until Phase 9 activates multi-tenancy.
+>
+> **Clean-slate note:** The target Supabase project contained tables from an unrelated previous app. With user authorization, the `public` schema was dropped and recreated (with Supabase role grants restored) before `db:push`. A throwaway `scripts/reset-db.mjs` handled this and was deleted after the reset.
+>
+> **GBP table rename:** `outreachCampaigns` → `campaigns` in TypeScript and SQL. Touched call sites in [server/storage.ts](server/storage.ts) (method renames `createCampaign`, `getCampaigns`) and [server/routes.ts](server/routes.ts) (2 sites).
 
 ### 1.3 Auth strategy
 

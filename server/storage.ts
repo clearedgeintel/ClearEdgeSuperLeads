@@ -2,7 +2,7 @@ import {
   users,
   leads,
   gbpProfiles,
-  outreachCampaigns,
+  campaigns,
   outreachEmails,
   type User,
   type UpsertUser,
@@ -10,8 +10,8 @@ import {
   type InsertLead,
   type GbpProfile,
   type InsertGbpProfile,
-  type OutreachCampaign,
-  type InsertOutreachCampaign,
+  type Campaign,
+  type InsertCampaign,
   type OutreachEmail,
   type InsertOutreachEmail,
 } from "@shared/schema";
@@ -40,8 +40,8 @@ export interface IStorage {
   syncGbpProfile(locationId: string, profileData: any): Promise<void>;
 
   // Outreach operations
-  createOutreachCampaign(campaign: InsertOutreachCampaign): Promise<OutreachCampaign>;
-  getOutreachCampaigns(userId: string): Promise<OutreachCampaign[]>;
+  createCampaign(campaign: InsertCampaign): Promise<Campaign>;
+  getCampaigns(userId: string): Promise<Campaign[]>;
   createOutreachEmail(email: InsertOutreachEmail): Promise<OutreachEmail>;
   getOutreachEmails(campaignId?: string): Promise<OutreachEmail[]>;
   updateOutreachEmailStatus(id: string, status: string, timestamp?: Date): Promise<void>;
@@ -173,9 +173,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Outreach operations
-  async createOutreachCampaign(campaignData: InsertOutreachCampaign): Promise<OutreachCampaign> {
+  async createCampaign(campaignData: InsertCampaign): Promise<Campaign> {
     const [campaign] = await db
-      .insert(outreachCampaigns)
+      .insert(campaigns)
       .values({
         id: nanoid(),
         ...campaignData,
@@ -184,8 +184,8 @@ export class DatabaseStorage implements IStorage {
     return campaign;
   }
 
-  async getOutreachCampaigns(userId: string): Promise<OutreachCampaign[]> {
-    return await db.select().from(outreachCampaigns).where(eq(outreachCampaigns.createdBy, userId));
+  async getCampaigns(userId: string): Promise<Campaign[]> {
+    return await db.select().from(campaigns).where(eq(campaigns.createdBy, userId));
   }
 
   async createOutreachEmail(emailData: InsertOutreachEmail): Promise<OutreachEmail> {
