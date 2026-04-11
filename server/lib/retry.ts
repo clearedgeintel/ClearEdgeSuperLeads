@@ -1,6 +1,8 @@
 // Retry with exponential backoff + jitter. Ported from ClearEdge Leads
-// lib/retry.js; logger.warn call swapped for console.warn since the GBP
-// base doesn't use pino yet — Phase 6's structured-logger pass replaces it.
+// lib/retry.js. Phase 6 swapped the Phase 3 console.warn placeholder
+// for the pino logger so retries show up in structured log output.
+
+import { logger } from './logger';
 
 const DEFAULTS = {
   maxRetries: 3,
@@ -45,13 +47,16 @@ export async function withRetry<T>(
       if (isLast || !isRetryable) throw err;
 
       const delay = Math.min(baseDelayMs * Math.pow(2, attempt) + Math.random() * 500, maxDelayMs);
-      console.warn('[retry]', {
-        attempt: attempt + 1,
-        maxRetries,
-        delay: Math.round(delay),
-        label,
-        error: message,
-      });
+      logger.warn(
+        {
+          attempt: attempt + 1,
+          maxRetries,
+          delayMs: Math.round(delay),
+          label,
+          error: message,
+        },
+        'retrying after error'
+      );
       await sleep(delay);
     }
   }

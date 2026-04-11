@@ -169,6 +169,63 @@ export class DatabaseStorage implements IStorage {
     return workspace;
   }
 
+  // Upsert a workspace-scoped config value. Used by the Settings page.
+  async setAppConfig(
+    key: string,
+    value: string,
+    workspaceId?: string | null
+  ): Promise<void> {
+    // Check whether a row for (workspaceId, key) already exists.
+    const [existing] = await db
+      .select()
+      .from(appConfig)
+      .where(
+        and(
+          eq(appConfig.key, key),
+          workspaceId ? eq(appConfig.workspaceId, workspaceId) : isNull(appConfig.workspaceId)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(appConfig)
+        .set({ value, updatedAt: new Date() })
+        .where(
+          and(
+            eq(appConfig.key, key),
+            workspaceId
+              ? eq(appConfig.workspaceId, workspaceId)
+              : isNull(appConfig.workspaceId)
+          )
+        );
+    } else {
+      await db.insert(appConfig).values({
+        key,
+        value,
+        workspaceId: workspaceId ?? null,
+      });
+    }
+  }
+
+  async getAllAppConfig(workspaceId?: string | null): Promise<Record<string, string>> {
+    const conditions = [];
+    if (workspaceId) {
+      conditions.push(or(eq(appConfig.workspaceId, workspaceId), isNull(appConfig.workspaceId))!);
+    }
+    const rows = await db
+      .select()
+      .from(appConfig)
+      .where(conditions.length ? and(...conditions) : undefined);
+    // Workspace-scoped rows override the global fallback when both exist.
+    const out: Record<string, string> = {};
+    for (const r of rows) {
+      if (r.workspaceId === null && out[r.key] !== undefined) continue;
+      out[r.key] = r.value;
+    }
+    return out;
+  }
+
   // App config — workspace-scoped key/value store. Falls back to a
   // workspace-null row if the workspace-specific key isn't set.
   async getAppConfig(key: string, workspaceId?: string | null): Promise<string | null> {

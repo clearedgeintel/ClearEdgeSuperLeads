@@ -12,6 +12,7 @@ import cron from 'node-cron';
 import { queueGenerationService } from '../services/queueGenerationService';
 import { unipileDispatchService } from '../services/unipileDispatchService';
 import { inboxSyncService } from '../services/inboxSyncService';
+import { logger } from '../lib/logger';
 
 type JobFn = () => Promise<void>;
 
@@ -19,9 +20,12 @@ async function runJob(name: string, fn: JobFn): Promise<void> {
   const started = Date.now();
   try {
     await fn();
-    console.log(`[jobs] ${name} ok`, { ms: Date.now() - started });
+    logger.info({ job: name, ms: Date.now() - started }, 'job ok');
   } catch (err) {
-    console.error(`[jobs] ${name} failed`, { ms: Date.now() - started, err });
+    logger.error(
+      { job: name, ms: Date.now() - started, err },
+      'job failed'
+    );
   }
 }
 
@@ -36,7 +40,7 @@ export function startScheduler(): void {
   if (started) return;
   if (process.env.NODE_ENV === 'test') return;
   if (process.env.DISABLE_SCHEDULER === '1') {
-    console.log('[jobs] scheduler disabled via DISABLE_SCHEDULER=1');
+    logger.info('scheduler disabled via DISABLE_SCHEDULER=1');
     return;
   }
 
@@ -44,7 +48,7 @@ export function startScheduler(): void {
   cron.schedule('*/15 * * * *', () => {
     void runJob('queueGeneration', async () => {
       const result = await queueGenerationService.generateBatch();
-      console.log('[jobs] queueGeneration result', result);
+      logger.info({ result }, 'queueGeneration batch');
     });
   });
 
@@ -54,7 +58,7 @@ export function startScheduler(): void {
   cron.schedule('*/5 * * * *', () => {
     void runJob('queueDispatch', async () => {
       const result = await unipileDispatchService.dispatchApproved(null);
-      console.log('[jobs] queueDispatch result', result);
+      logger.info({ result }, 'queueDispatch batch');
     });
   });
 
@@ -62,10 +66,12 @@ export function startScheduler(): void {
   cron.schedule('*/10 * * * *', () => {
     void runJob('inboxSync', async () => {
       const result = await inboxSyncService.sync(null);
-      console.log('[jobs] inboxSync result', result);
+      logger.info({ result }, 'inboxSync batch');
     });
   });
 
   started = true;
-  console.log('[jobs] scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m)');
+  logger.info(
+    'scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m)'
+  );
 }

@@ -18,6 +18,15 @@ import { inboxSyncService } from "./services/inboxSyncService";
 import { analyticsService } from "./services/analyticsService";
 import { optimizationService } from "./services/optimizationService";
 import { apiKeyAuth } from "./middleware/auth";
+import { linkedinLimiter, aiLimiter, dispatchLimiter } from "./middleware/rateLimit";
+import { validateBody } from "./middleware/validate";
+import {
+  linkedinSearchSchema,
+  linkedinSaveProfilesSchema,
+  createCampaignSchema,
+  createCampaignStepSchema,
+  generateMessageSchema,
+} from "@shared/validators";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
 
 import { nanoid } from "nanoid";
@@ -447,7 +456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // LinkedIn search routes (Phase 3 — Unipile-backed prospect search)
-  app.post('/api/linkedin/search', requireAuth, async (req, res) => {
+  app.post('/api/linkedin/search', linkedinLimiter, requireAuth, validateBody(linkedinSearchSchema), async (req, res) => {
     try {
       const user = req.session.user!;
       const { query, title, company, industry, location, cursor } = req.body ?? {};
@@ -469,7 +478,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/linkedin/search/save', requireAuth, async (req, res) => {
+  app.post('/api/linkedin/search/save', linkedinLimiter, requireAuth, validateBody(linkedinSaveProfilesSchema), async (req, res) => {
     try {
       const user = req.session.user!;
       const profiles = Array.isArray(req.body?.profiles) ? req.body.profiles : [];
@@ -675,11 +684,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/campaigns', requireAuth, async (req, res) => {
+  app.post('/api/campaigns', requireAuth, validateBody(createCampaignSchema), async (req, res) => {
     try {
       const user = req.session.user!;
-      const { name, description, outreachChannel, tone, dailySendLimit, maxTouches, requireApproval, emailTemplate } = req.body ?? {};
-      if (!name) return res.status(400).json({ success: false, error: 'name is required' });
+      const { name, description, outreachChannel, tone, dailySendLimit, maxTouches, requireApproval, emailTemplate } = req.body;
       const campaign = await storage.createCampaign({
         name,
         description: description ?? null,
@@ -733,12 +741,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/campaign-steps', requireAuth, async (req, res) => {
+  app.post('/api/campaign-steps', requireAuth, validateBody(createCampaignStepSchema), async (req, res) => {
     try {
-      const { campaignId, stepOrder, stepType, delayDays, promptTemplate, characterLimit } = req.body ?? {};
-      if (!campaignId || stepOrder === undefined || !stepType) {
-        return res.status(400).json({ success: false, error: 'campaignId, stepOrder, stepType are required' });
-      }
+      const { campaignId, stepOrder, stepType, delayDays, promptTemplate, characterLimit } = req.body;
       const step = await storage.createCampaignStep({
         campaignId,
         stepOrder,
@@ -828,12 +833,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Message generation — single enrollment
-  app.post('/api/messages/generate', requireAuth, async (req, res) => {
+  app.post('/api/messages/generate', aiLimiter, requireAuth, validateBody(generateMessageSchema), async (req, res) => {
     try {
-      const { enrollmentId, stepId } = req.body ?? {};
-      if (!enrollmentId || !stepId) {
-        return res.status(400).json({ success: false, error: 'enrollmentId and stepId are required' });
-      }
+      const { enrollmentId, stepId } = req.body;
       const result = await queueGenerationService.generateForEnrollment(enrollmentId, stepId);
       res.json({ success: true, data: result });
     } catch (error: any) {
@@ -844,7 +846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Message generation — batch. Wired behind both session auth (for ops UI
   // "Generate now" button) and apiKeyAuth (for the scheduled cron job).
-  app.post('/api/messages/trigger-batch', (req, res, next) => {
+  app.post('/api/messages/trigger-batch', aiLimiter, (req, res, next) => {
     if (req.session?.user) return next();
     return apiKeyAuth(req, res, next);
   }, async (_req, res) => {
@@ -945,7 +947,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Dispatch approved queue items via Unipile. Wired for session auth
   // (ops UI) and apiKeyAuth (scheduler cron).
-  app.post('/api/queue/dispatch', (req, res, next) => {
+  app.post('/api/queue/dispatch', dispatchLimiter, (req, res, next) => {
     if (req.session?.user) return next();
     return apiKeyAuth(req, res, next);
   }, async (req, res) => {
@@ -975,7 +977,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Unipile inbox sync — fetches new replies + accepted connections,
   // classifies reply sentiment, records engagement_events. Session auth
   // for ops UI, apiKeyAuth for the scheduler cron.
-  app.post('/api/inbox/sync', (req, res, next) => {
+  app.post('/api/inbox/sync', dispatchLimiter, (req, res, next) => {
     if (req.session?.user) return next();
     return apiKeyAuth(req, res, next);
   }, async (req, res) => {
@@ -1037,7 +1039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Phase 5 optimization — auto-pause + Claude suggestions + VoC analysis
-  app.post('/api/optimize/campaigns', requireAuth, async (req, res) => {
+  app.post('/api/optimize/campaigns', aiLimiter, requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
       const result = await optimizationService.optimizeCampaigns(user.workspaceId);
@@ -1048,7 +1050,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/optimize/voc-analysis', requireAuth, async (req, res) => {
+  app.post('/api/optimize/voc-analysis', aiLimiter, requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
       const days = parseInt((req.query.days as string) || '30');
@@ -1067,6 +1069,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, data });
     } catch (error: any) {
       console.error('Get insights error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Settings (Phase 6) — workspace-scoped app_config read/write. Secrets
+  // like API keys live in .env at the server level; this endpoint only
+  // surfaces operator-configurable values (Unipile account, Calendly
+  // link, daily limits, etc.). The API-usage summary is computed from
+  // the api_usage_log aggregate so operators can see spend-to-date.
+  const SETTINGS_KEYS = [
+    'unipile_account_id',
+    'unipile_base_url',
+    'calendly_link',
+    'linkedin_search_limit_hourly',
+    'linkedin_dispatch_limit_hourly',
+    'email_dispatch_limit_hourly',
+    'linkedin_compliance_mode',
+    'sendgrid_from_email',
+    'slack_webhook_url',
+  ] as const;
+  type SettingsKey = (typeof SETTINGS_KEYS)[number];
+
+  app.get('/api/settings', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const config = await storage.getAllAppConfig(user.workspaceId);
+      const values: Partial<Record<SettingsKey, string>> = {};
+      for (const k of SETTINGS_KEYS) {
+        if (config[k] !== undefined) values[k] = config[k];
+      }
+      // API usage (this calendar month)
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      const usage = await analyticsService.getApiCosts(31, user.workspaceId);
+
+      res.json({
+        success: true,
+        data: {
+          values,
+          usage: {
+            totalCalls: usage.totalCalls,
+            estimatedClaudeCostUsd: usage.estimatedClaudeCostUsd,
+            byProvider: usage.byProvider,
+          },
+          workspace: req.workspace ?? null,
+        },
+      });
+    } catch (error: any) {
+      console.error('Get settings error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/settings', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const updates = (req.body ?? {}) as Partial<Record<SettingsKey, string>>;
+      const updated: SettingsKey[] = [];
+      for (const key of SETTINGS_KEYS) {
+        const value = updates[key];
+        if (typeof value === 'string') {
+          await storage.setAppConfig(key, value, user.workspaceId);
+          updated.push(key);
+        }
+      }
+      res.json({ success: true, data: { updated } });
+    } catch (error: any) {
+      console.error('Update settings error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
