@@ -277,7 +277,7 @@ export class UnipileDispatchService {
         leadId: item.leadId,
         campaignId: step?.campaignId ?? null,
         channel: item.channel ?? 'linkedin',
-        messageText: item.editedDraft ?? item.aiDraft ?? '',
+        messageText: `${item.editedDraft ?? item.aiDraft ?? ''}\n\n[error] ${errorMessage}`,
         stepType: step?.stepType ?? null,
         dispatchedAt: new Date(),
         unipileMessageId: null,

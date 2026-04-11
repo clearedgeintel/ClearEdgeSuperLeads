@@ -878,6 +878,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Inbox events — reply_received + connection_accepted joined with lead
+  app.get('/api/inbox/events', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const events = await storage.getRecentInboxEvents(user.workspaceId, limit);
+      res.json({ success: true, data: events });
+    } catch (error: any) {
+      console.error('Get inbox events error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Unipile inbox sync — fetches new replies + accepted connections,
   // classifies reply sentiment, records engagement_events. Session auth
   // for ops UI, apiKeyAuth for the scheduler cron.

@@ -112,6 +112,7 @@ export interface IStorage {
   createEngagementEvent(event: Omit<EngagementEvent, 'id'>): Promise<EngagementEvent>;
   getEngagementEventsForLead(leadId: string): Promise<EngagementEvent[]>;
   hasEngagementEvent(leadId: string, eventType: string): Promise<boolean>;
+  getRecentInboxEvents(workspaceId?: string | null, limit?: number): Promise<Array<EngagementEvent & { lead: Lead | null }>>;
 
   // Lead lookups for inbox sync
   getLeadsWithUnipileMemberId(workspaceId?: string | null): Promise<Lead[]>;
@@ -630,6 +631,34 @@ export class DatabaseStorage implements IStorage {
       )
       .limit(1);
     return Boolean(row);
+  }
+
+  async getRecentInboxEvents(
+    workspaceId?: string | null,
+    limit: number = 50
+  ): Promise<Array<EngagementEvent & { lead: Lead | null }>> {
+    // Return reply_received + connection_accepted events joined with lead info,
+    // newest first. Workspace-scoped via the leads join.
+    const conditions = [
+      or(
+        eq(engagementEvents.eventType, 'reply_received'),
+        eq(engagementEvents.eventType, 'connection_accepted')
+      )!,
+    ];
+    if (workspaceId) conditions.push(eq(engagementEvents.workspaceId, workspaceId));
+
+    const rows = await db
+      .select({
+        event: engagementEvents,
+        lead: leads,
+      })
+      .from(engagementEvents)
+      .leftJoin(leads, eq(engagementEvents.leadId, leads.id))
+      .where(and(...conditions))
+      .orderBy(desc(engagementEvents.occurredAt))
+      .limit(limit);
+
+    return rows.map((r) => ({ ...r.event, lead: r.lead }));
   }
 
   async getLeadsWithUnipileMemberId(workspaceId?: string | null): Promise<Lead[]> {
