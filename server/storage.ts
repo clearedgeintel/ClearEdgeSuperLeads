@@ -4,6 +4,7 @@ import {
   gbpProfiles,
   campaigns,
   outreachEmails,
+  workspaces,
   type User,
   type UpsertUser,
   type Lead,
@@ -14,12 +15,17 @@ import {
   type InsertCampaign,
   type OutreachEmail,
   type InsertOutreachEmail,
+  type Workspace,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 export interface IStorage {
+  // Workspace operations
+  getWorkspace(id: string): Promise<Workspace | undefined>;
+  createPersonalWorkspace(userId: string, email: string | null): Promise<Workspace>;
+
   // User operations
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
@@ -48,6 +54,26 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // Workspace operations
+  async getWorkspace(id: string): Promise<Workspace | undefined> {
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, id));
+    return workspace;
+  }
+
+  async createPersonalWorkspace(userId: string, email: string | null): Promise<Workspace> {
+    const slug = (email?.split('@')[0] || userId).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const [workspace] = await db
+      .insert(workspaces)
+      .values({
+        id: nanoid(),
+        name: email ? `${email}'s workspace` : 'Personal workspace',
+        slug: `${slug}-${nanoid(6).toLowerCase()}`,
+        plan: 'free',
+      })
+      .returning();
+    return workspace;
+  }
+
   // User operations
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -66,6 +92,19 @@ export class DatabaseStorage implements IStorage {
         },
       })
       .returning();
+
+    // Auto-create a personal workspace on first login. In Phase 9 this is
+    // replaced by the invite/Stripe flow, but Phase 1 users land here.
+    if (!user.workspaceId) {
+      const workspace = await this.createPersonalWorkspace(user.id, user.email ?? null);
+      const [updated] = await db
+        .update(users)
+        .set({ workspaceId: workspace.id, updatedAt: new Date() })
+        .where(eq(users.id, user.id))
+        .returning();
+      return updated;
+    }
+
     return user;
   }
 

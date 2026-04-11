@@ -217,13 +217,15 @@ Create `shared/schema.ts` with all table definitions:
 
 ### 1.3 Auth strategy
 
-- [ ] Keep Google OAuth from GBP app as primary login (`server/services/googleAuth.ts`)
-- [ ] On first login, auto-create a personal workspace for the user
-- [ ] Keep `fallbackAuth.ts` for local dev demo login
-- [ ] Port `middleware/auth.js` → `server/middleware/auth.ts`
-- [ ] Add `requireWorkspace` middleware stub — injects `req.workspace` (fully enforced Phase 9)
-- [ ] Port `middleware/validate.js` → `server/middleware/validate.ts` (Zod-based)
-- [ ] Port `middleware/error-handler.js` → `server/middleware/errorHandler.ts`
+- [x] Keep Google OAuth from GBP app as primary login (`server/services/googleAuth.ts`)
+- [x] On first login, auto-create a personal workspace for the user (handled in `storage.upsertUser` so every auth path — Google OAuth + demo login — gets a workspace)
+- [x] Keep `fallbackAuth.ts` for local dev demo login
+- [x] Port `middleware/auth.js` → [server/middleware/auth.ts](server/middleware/auth.ts) as `apiKeyAuth` — used for webhook/n8n endpoints, distinct from session-based `requireAuth` in `fallbackAuth.ts`
+- [x] Add [server/middleware/requireWorkspace.ts](server/middleware/requireWorkspace.ts) stub — injects `req.workspace` via a typed Express.Request augmentation in [server/types/session.d.ts](server/types/session.d.ts). Non-blocking until Phase 9 promotes it to a hard 403 gate.
+- [x] Port `middleware/validate.js` → [server/middleware/validate.ts](server/middleware/validate.ts) as `validateBody<T>(schema)` — generic Zod wrapper
+- [x] Port `middleware/error-handler.js` → [server/middleware/errorHandler.ts](server/middleware/errorHandler.ts) — uses `console.error` for now; swapped for pino in Phase 6's structured-logger pass
+
+> **Phase 1.3 status:** Complete as of 2026-04-11. Middleware files live under `server/middleware/`. None of the new middleware is wired into `server/index.ts` or routes yet — they're available for Phase 2+ to mount as needed. The one behavior change that does ship immediately is workspace auto-creation on login: any `upsertUser` call whose result has no `workspaceId` triggers a `createPersonalWorkspace` insert and an update on the user row.
 
 ---
 
