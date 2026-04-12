@@ -11,6 +11,7 @@ import { emailService, EmailSuppressedError, EmailUndeliverableError, EmailDaily
 import { PlanLimitExceededError } from "./lib/planLimits";
 import { billingService, BillingNotConfiguredError } from "./services/billingService";
 import { verifyEmailWithHunter } from "./services/emailVerification";
+import { enrichmentService } from "./services/enrichmentService";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
@@ -1972,6 +1973,153 @@ your recipients' jurisdictions.</p>`
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('GDPR delete error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 10 — Enrichment (Apollo + Hunter chain)
+  app.post('/api/leads/:id/enrich-full', aiLimiter, requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const result = await enrichmentService.enrichLead(req.params.id, user.workspaceId);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Enrich error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 10 — Deduplication
+  app.post('/api/leads/deduplicate', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(400).json({ success: false, error: 'No workspace' });
+      }
+      const result = await storage.bulkDeduplicateWorkspace(user.workspaceId);
+      await storage.createAuditEntry({
+        workspaceId: user.workspaceId,
+        userId: user.id,
+        action: 'bulk_deduplicate',
+        entityType: 'lead',
+        entityId: null,
+        metadata: { scanned: result.scanned, merged: result.merged },
+      });
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Deduplicate error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 10 — Domain suppression import (newline-separated domains)
+  app.post('/api/suppression/import-domains', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const { domains } = req.body ?? {};
+      if (!domains || typeof domains !== 'string') {
+        return res
+          .status(400)
+          .json({ success: false, error: 'domains string required (newline-separated)' });
+      }
+      const list = domains
+        .split(/\r?\n/)
+        .map((d: string) => d.trim().toLowerCase().replace(/^@/, ''))
+        .filter(Boolean);
+      let added = 0;
+      for (const domain of list) {
+        try {
+          await storage.addSuppressionEntry({
+            workspaceId: user.workspaceId ?? null,
+            email: null,
+            domain,
+            reason: 'manual',
+          });
+          added++;
+        } catch {
+          // Skip duplicates.
+        }
+      }
+      res.json({ success: true, data: { added, total: list.length } });
+    } catch (error: any) {
+      console.error('Import domains error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 10 — CSV lead import. Expects { rows: Array<{...}> } in the
+  // body — the frontend parses the CSV client-side and sends structured
+  // JSON. Caps at 1000 rows per request.
+  app.post('/api/leads/import', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const { rows } = req.body ?? {};
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ success: false, error: 'rows array is required' });
+      }
+
+      let imported = 0;
+      let skipped = 0;
+      let duplicates = 0;
+      let suppressed = 0;
+
+      for (const row of rows.slice(0, 1000)) {
+        const name = row.full_name ?? row.fullName ?? row.business_name ?? row.businessName;
+        if (!name) {
+          skipped++;
+          continue;
+        }
+        const email = (row.email ?? '').trim().toLowerCase() || null;
+
+        if (email) {
+          const isSuppressed = await storage.isSuppressed(email, user.workspaceId);
+          if (isSuppressed) {
+            suppressed++;
+            continue;
+          }
+        }
+
+        const dupes = await storage.findDuplicateLeads(
+          {
+            email,
+            linkedinUrl: row.linkedin_url ?? row.linkedinUrl ?? null,
+            businessName: name,
+            website: row.website ?? null,
+          },
+          user.workspaceId
+        );
+        if (dupes.length > 0) {
+          duplicates++;
+          continue;
+        }
+
+        await storage.createLead({
+          businessName: name,
+          fullName: row.full_name ?? row.fullName ?? null,
+          email,
+          phone: row.phone ?? null,
+          website: row.website ?? null,
+          address: row.address ?? null,
+          category: row.category ?? null,
+          industry: row.industry ?? null,
+          company: row.company ?? null,
+          title: row.title ?? null,
+          linkedinUrl: row.linkedin_url ?? row.linkedinUrl ?? null,
+          leadSource: row.lead_source ?? row.leadSource ?? 'google',
+          status: 'new',
+          priority: row.priority ?? 'medium',
+          createdBy: user.id,
+          workspaceId: user.workspaceId,
+        });
+        imported++;
+      }
+
+      res.json({
+        success: true,
+        data: { imported, skipped, duplicates, suppressed, total: rows.length },
+      });
+    } catch (error: any) {
+      console.error('CSV import error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

@@ -12,8 +12,12 @@ import cron from 'node-cron';
 import { queueGenerationService } from '../services/queueGenerationService';
 import { unipileDispatchService } from '../services/unipileDispatchService';
 import { inboxSyncService } from '../services/inboxSyncService';
+import { enrichmentService } from '../services/enrichmentService';
 import { storage } from '../storage';
 import { logger } from '../lib/logger';
+import { leads } from '@shared/schema';
+import { and, lte, or, eq, isNull } from 'drizzle-orm';
+import { db } from '../db';
 
 type JobFn = () => Promise<void>;
 
@@ -82,8 +86,44 @@ export function startScheduler(): void {
     });
   });
 
+  // Phase 10 — daily re-enrichment sweep at 3am UTC. Finds leads where
+  // re_enrich_after has expired and status is not 'converted'. Batched
+  // at 50 leads per tick to avoid burning through API quotas.
+  cron.schedule('0 3 * * *', () => {
+    void runJob('reEnrichment', async () => {
+      const now = new Date();
+      const staleLeads = await db
+        .select()
+        .from(leads)
+        .where(
+          and(
+            lte(leads.reEnrichAfter, now),
+            or(
+              eq(leads.status, 'new'),
+              eq(leads.status, 'contacted'),
+              eq(leads.status, 'connected'),
+              eq(leads.status, 'replied'),
+              isNull(leads.status)
+            )!
+          )
+        )
+        .limit(50);
+
+      let enriched = 0;
+      for (const lead of staleLeads) {
+        try {
+          await enrichmentService.enrichLead(lead.id, lead.workspaceId);
+          enriched++;
+        } catch (err) {
+          logger.warn({ leadId: lead.id, err }, 'reEnrichment failed for lead');
+        }
+      }
+      logger.info({ found: staleLeads.length, enriched }, 'reEnrichment sweep');
+    });
+  });
+
   started = true;
   logger.info(
-    'scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m, usageReset 0:05 on 1st)'
+    'scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m, usageReset 0:05 on 1st, reEnrich 3am)'
   );
 }

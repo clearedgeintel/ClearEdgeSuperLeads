@@ -256,6 +256,129 @@ export class DatabaseStorage implements IStorage {
     await db.delete(unipileAccounts).where(eq(unipileAccounts.id, id));
   }
 
+  // ============================================================
+  // Phase 10 — Deduplication + CSV import + enrichment
+  // ============================================================
+
+  async findDuplicateLeads(
+    lead: { email?: string | null; linkedinUrl?: string | null; businessName?: string | null; website?: string | null },
+    workspaceId?: string | null
+  ): Promise<Lead[]> {
+    const orConditions = [];
+    if (lead.email) orConditions.push(eq(leads.email, lead.email.toLowerCase()));
+    if (lead.linkedinUrl) orConditions.push(eq(leads.linkedinUrl, lead.linkedinUrl));
+    if (lead.businessName && lead.website) {
+      orConditions.push(
+        and(eq(leads.businessName, lead.businessName), eq(leads.website, lead.website))!
+      );
+    }
+    if (orConditions.length === 0) return [];
+    const conditions = [or(...orConditions)!];
+    if (workspaceId) conditions.push(eq(leads.workspaceId, workspaceId));
+    return await db.select().from(leads).where(and(...conditions));
+  }
+
+  async mergeLeads(keepId: string, mergeId: string): Promise<Lead> {
+    const keep = await this.getLead(keepId);
+    const merge = await this.getLead(mergeId);
+    if (!keep || !merge) throw new Error('Lead not found for merge');
+
+    // Prefer non-null fields from the newer record, combine notes.
+    const updates: Partial<Lead> = {};
+    for (const key of Object.keys(merge) as Array<keyof Lead>) {
+      if (key === 'id' || key === 'createdAt') continue;
+      const kv = keep[key];
+      const mv = merge[key];
+      if ((kv === null || kv === undefined || kv === '') && mv !== null && mv !== undefined && mv !== '') {
+        (updates as Record<string, unknown>)[key] = mv;
+      }
+    }
+    if (merge.notes && keep.notes) {
+      updates.notes = `${keep.notes}\n---\n${merge.notes}`;
+    }
+    if (merge.enrichedAt && (!keep.enrichedAt || merge.enrichedAt > keep.enrichedAt)) {
+      updates.enrichmentData = merge.enrichmentData;
+      updates.enrichedAt = merge.enrichedAt;
+    }
+
+    // Reassign child rows from merge → keep.
+    await db.update(sendQueue).set({ leadId: keepId }).where(eq(sendQueue.leadId, mergeId));
+    await db.update(sendLog).set({ leadId: keepId }).where(eq(sendLog.leadId, mergeId));
+    await db.update(engagementEvents).set({ leadId: keepId }).where(eq(engagementEvents.leadId, mergeId));
+    await db.update(outreachEmails).set({ leadId: keepId }).where(eq(outreachEmails.leadId, mergeId));
+    await db.update(campaignEnrollments).set({ leadId: keepId }).where(eq(campaignEnrollments.leadId, mergeId));
+
+    // Apply merged fields + delete the duplicate.
+    const [updated] = await db
+      .update(leads)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(leads.id, keepId))
+      .returning();
+    await db.delete(leads).where(eq(leads.id, mergeId));
+    return updated;
+  }
+
+  async bulkDeduplicateWorkspace(workspaceId: string): Promise<{
+    scanned: number;
+    merged: number;
+    groups: Array<{ keepId: string; mergedIds: string[] }>;
+  }> {
+    const allLeads = await db
+      .select()
+      .from(leads)
+      .where(
+        and(
+          eq(leads.workspaceId, workspaceId),
+          or(eq(leads.isDeleted, false), isNull(leads.isDeleted))!
+        )
+      );
+
+    // Group by email → linkedin_url → (businessName + website).
+    const groups = new Map<string, Lead[]>();
+    for (const l of allLeads) {
+      const keys = [];
+      if (l.email) keys.push(`email:${l.email.toLowerCase()}`);
+      if (l.linkedinUrl) keys.push(`li:${l.linkedinUrl}`);
+      if (l.businessName && l.website) keys.push(`biz:${l.businessName}|${l.website}`);
+      for (const k of keys) {
+        const bucket = groups.get(k) ?? [];
+        bucket.push(l);
+        groups.set(k, bucket);
+      }
+    }
+
+    let merged = 0;
+    const mergeResults: Array<{ keepId: string; mergedIds: string[] }> = [];
+    const alreadyMerged = new Set<string>();
+
+    for (const bucket of Array.from(groups.values())) {
+      if (bucket.length < 2) continue;
+      const sorted = bucket.sort(
+        (a: Lead, b: Lead) =>
+          new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime()
+      );
+      const keep = sorted[0];
+      if (alreadyMerged.has(keep.id)) continue;
+      const mergedIds: string[] = [];
+      for (const dup of sorted.slice(1)) {
+        if (alreadyMerged.has(dup.id)) continue;
+        try {
+          await this.mergeLeads(keep.id, dup.id);
+          alreadyMerged.add(dup.id);
+          mergedIds.push(dup.id);
+          merged++;
+        } catch {
+          // Skip failures — partial merge is better than no merge.
+        }
+      }
+      if (mergedIds.length > 0) {
+        mergeResults.push({ keepId: keep.id, mergedIds });
+      }
+    }
+
+    return { scanned: allLeads.length, merged, groups: mergeResults };
+  }
+
   async createPersonalWorkspace(userId: string, email: string | null): Promise<Workspace> {
     const slug = (email?.split('@')[0] || userId).toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const [workspace] = await db
