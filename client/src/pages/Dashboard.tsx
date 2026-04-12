@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useSSE } from "@/hooks/useSSE";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { Button } from "@/components/ui/button";
 import { MapPin, LogOut, AlertTriangle } from "lucide-react";
@@ -15,6 +16,7 @@ import EmailOutreach from "@/components/EmailOutreach";
 import Analytics from "@/components/Analytics";
 import Reports from "@/components/Reports";
 import Settings from "@/components/Settings";
+import NotificationBell from "@/components/NotificationBell";
 
 interface LinkedInLimit {
   action: string;
@@ -28,6 +30,12 @@ export default function Dashboard() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('leadDiscovery');
   const [apiStatus, setApiStatus] = useState<any>({});
+
+  // Phase 11 — SSE connection for live updates. The hook registers
+  // listeners for queue_updated, reply_received, connection_accepted
+  // and invalidates the relevant TanStack Query keys so child
+  // components auto-refresh without polling.
+  useSSE();
 
   // Phase 7 — LinkedIn daily limit banner. Polls once a minute so
   // operators see a warning before they hit the hard cap mid-batch.
@@ -147,6 +155,7 @@ export default function Dashboard() {
               <span className="text-sm font-medium text-gray-700">
                 {user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.email}
               </span>
+              <NotificationBell />
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="h-4 w-4" />
               </Button>

@@ -12,6 +12,7 @@ import { PlanLimitExceededError } from "./lib/planLimits";
 import { billingService, BillingNotConfiguredError } from "./services/billingService";
 import { verifyEmailWithHunter } from "./services/emailVerification";
 import { enrichmentService } from "./services/enrichmentService";
+import { addClient, emit } from "./lib/eventEmitter";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
@@ -197,6 +198,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // run before the Google OAuth + unsubscribe public routes. Phase 9
   // promotes it from "informational" to "injected on every request".
   app.use(requireWorkspace);
+
+  // Phase 11 — SSE endpoint. Authenticated, workspace-scoped, per-user
+  // connection. Sends heartbeat pings every 30s to keep the connection
+  // alive through load balancers and browser idle timeouts.
+  app.get('/api/events', requireAuth, (req, res) => {
+    const user = req.session.user!;
+    if (!user.workspaceId) {
+      return res.status(400).json({ success: false, error: 'No workspace' });
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(`event: connected\ndata: ${JSON.stringify({ userId: user.id })}\n\n`);
+    addClient(user.workspaceId, user.id, res);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 30_000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+    });
+  });
 
   // Google OAuth routes
   app.get('/api/auth/google', (req, res) => {
@@ -1973,6 +2004,39 @@ your recipients' jurisdictions.</p>`
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('GDPR delete error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 11 — Notification center
+  app.get('/api/notifications', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const data = await storage.getUnreadNotifications(user.id);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('Get notifications error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
+    try {
+      await storage.markNotificationRead(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Mark read error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const count = await storage.markAllNotificationsRead(user.id);
+      res.json({ success: true, data: { marked: count } });
+    } catch (error: any) {
+      console.error('Mark all read error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

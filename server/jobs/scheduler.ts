@@ -13,8 +13,10 @@ import { queueGenerationService } from '../services/queueGenerationService';
 import { unipileDispatchService } from '../services/unipileDispatchService';
 import { inboxSyncService } from '../services/inboxSyncService';
 import { enrichmentService } from '../services/enrichmentService';
+import { analyticsService } from '../services/analyticsService';
 import { storage } from '../storage';
 import { logger } from '../lib/logger';
+import { notifyJobFailure, recordJobSuccess } from './alerting';
 import { leads } from '@shared/schema';
 import { and, lte, or, eq, isNull } from 'drizzle-orm';
 import { db } from '../db';
@@ -26,11 +28,10 @@ async function runJob(name: string, fn: JobFn): Promise<void> {
   try {
     await fn();
     logger.info({ job: name, ms: Date.now() - started }, 'job ok');
+    await recordJobSuccess(name);
   } catch (err) {
-    logger.error(
-      { job: name, ms: Date.now() - started, err },
-      'job failed'
-    );
+    logger.error({ job: name, ms: Date.now() - started, err }, 'job failed');
+    await notifyJobFailure(name, err);
   }
 }
 
@@ -122,8 +123,49 @@ export function startScheduler(): void {
     });
   });
 
+  // Phase 11 — daily digest at 8am UTC. Queries last 24h activity and
+  // posts a summary to the workspace's Slack webhook (if configured).
+  // Falls back to logging if no webhook is set.
+  cron.schedule('0 8 * * *', () => {
+    void runJob('dailyDigest', async () => {
+      const slackUrl = await storage.getAppConfig('slack_webhook_url');
+      const overview = await analyticsService.getOverview(1); // last 1 day
+      const queueStats = await storage.getQueueStats();
+
+      const lines = [
+        `:chart_with_upwards_trend: *ClearEdge Daily Digest*`,
+        `*Last 24h:*`,
+        `• Messages sent: ${overview.messagesSentPeriod}`,
+        `• Connections accepted: ${overview.connectionsAccepted}`,
+        `• Replies: ${overview.repliesReceived} (${overview.replyRate}% rate)`,
+        `• Positive replies: ${overview.positiveReplies}`,
+        `• Meetings booked: ${overview.meetingsBooked}`,
+        `*Queue:*`,
+        `• Pending: ${queueStats.pending ?? 0}`,
+        `• Approved: ${queueStats.approved ?? 0}`,
+        `• Sent: ${queueStats.sent ?? 0}`,
+      ];
+      const text = lines.join('\n');
+
+      if (slackUrl) {
+        try {
+          await fetch(slackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          });
+          logger.info('daily digest posted to Slack');
+        } catch (err) {
+          logger.warn({ err }, 'daily digest Slack post failed');
+        }
+      } else {
+        logger.info({ text }, 'daily digest (no Slack webhook configured)');
+      }
+    });
+  });
+
   started = true;
   logger.info(
-    'scheduler started (queueGeneration 15m, queueDispatch 5m, inboxSync 10m, usageReset 0:05 on 1st, reEnrich 3am)'
+    'scheduler started (queueGen 15m, dispatch 5m, inbox 10m, usageReset 1st, reEnrich 3am, digest 8am)'
   );
 }

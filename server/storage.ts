@@ -18,8 +18,10 @@ import {
   suppressionList,
   auditLog,
   unipileAccounts,
+  notifications,
   type User,
   type UnipileAccount,
+  type Notification,
   type UpsertUser,
   type Lead,
   type InsertLead,
@@ -254,6 +256,50 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUnipileAccount(id: string): Promise<void> {
     await db.delete(unipileAccounts).where(eq(unipileAccounts.id, id));
+  }
+
+  // ============================================================
+  // Phase 11 — Notifications
+  // ============================================================
+
+  async createNotification(data: {
+    workspaceId: string | null;
+    userId: string | null;
+    type: string;
+    title: string;
+    body?: string | null;
+    link?: string | null;
+  }): Promise<Notification> {
+    const [row] = await db
+      .insert(notifications)
+      .values({ id: nanoid(), ...data })
+      .returning();
+    return row;
+  }
+
+  async getUnreadNotifications(userId: string, limit: number = 20): Promise<Notification[]> {
+    return await db
+      .select()
+      .from(notifications)
+      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit);
+  }
+
+  async markNotificationRead(id: string): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(eq(notifications.id, id));
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<number> {
+    const rows = await db
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .returning({ id: notifications.id });
+    return rows.length;
   }
 
   // ============================================================

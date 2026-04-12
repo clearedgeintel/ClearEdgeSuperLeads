@@ -14,6 +14,7 @@ import {
 } from '../lib/linkedinLimiter';
 import { logger } from '../lib/logger';
 import { assertPlanLimit, recordPlanSend, PlanLimitExceededError } from '../lib/planLimits';
+import { emit } from '../lib/eventEmitter';
 import type { SendQueueItem, CampaignStep } from '@shared/schema';
 
 export interface DispatchResult {
@@ -148,6 +149,7 @@ export class UnipileDispatchService {
       }
     }
 
+    emit(workspaceId, { type: 'queue_updated', data: result });
     return result;
   }
 

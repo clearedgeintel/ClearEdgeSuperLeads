@@ -13,6 +13,7 @@ import { withRetry } from '../lib/retry';
 import { classifyReply, type ReplySentiment } from './replyClassifier';
 import { recordReplyForVersion } from './promptEngine';
 import { storeConversation } from './ragEngine';
+import { emit } from '../lib/eventEmitter';
 import type { Lead } from '@shared/schema';
 
 export interface InboxSyncResult {
@@ -238,6 +239,19 @@ export class InboxSyncService {
         await storage.updateLead(lead.id, { status: 'connected' });
       }
       connectionsAccepted++;
+    }
+
+    if (replies > 0) {
+      emit(workspaceId, {
+        type: 'reply_received',
+        data: { replies, classifications },
+      });
+    }
+    if (connectionsAccepted > 0) {
+      emit(workspaceId, {
+        type: 'connection_accepted',
+        data: { connectionsAccepted },
+      });
     }
 
     return { replies, connectionsAccepted, classifications };
