@@ -21,7 +21,11 @@
   "overrides": [
     {
       "files": ["__tests__/**/*.ts", "**/*.test.ts"],
-      "env": { "jest": true }
+      "env": { "jest": true },
+      "rules": {
+        "@typescript-eslint/no-require-imports": "off",
+        "@typescript-eslint/no-var-requires": "off"
+      }
     },
     {
       "files": ["*.config.ts", "*.config.js", "*.config.cjs", "*.config.mjs"],
