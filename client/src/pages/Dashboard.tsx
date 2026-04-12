@@ -17,6 +17,7 @@ import Analytics from "@/components/Analytics";
 import Reports from "@/components/Reports";
 import Settings from "@/components/Settings";
 import NotificationBell from "@/components/NotificationBell";
+import Onboarding from "@/components/Onboarding";
 
 interface LinkedInLimit {
   action: string;
@@ -31,10 +32,9 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('leadDiscovery');
   const [apiStatus, setApiStatus] = useState<any>({});
 
-  // Phase 11 — SSE connection for live updates. The hook registers
-  // listeners for queue_updated, reply_received, connection_accepted
-  // and invalidates the relevant TanStack Query keys so child
-  // components auto-refresh without polling.
+  const [showOnboarding, setShowOnboarding] = useState(true);
+
+  // Phase 11 — SSE connection for live updates.
   useSSE();
 
   // Phase 7 — LinkedIn daily limit banner. Polls once a minute so
@@ -164,16 +164,16 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="flex">
-        {/* Sidebar Navigation */}
-        <nav className="w-64 bg-white border-r border-gray-200 min-h-screen">
-          <div className="p-6">
-            <div className="space-y-2">
+      <div className="flex flex-col md:flex-row">
+        {/* Navigation — sidebar on desktop, horizontal scroll strip on mobile */}
+        <nav className="md:w-64 bg-white border-b md:border-b-0 md:border-r border-gray-200 md:min-h-screen">
+          <div className="p-3 md:p-6 overflow-x-auto md:overflow-x-visible">
+            <div className="flex md:flex-col gap-1 md:gap-0 md:space-y-2 min-w-max md:min-w-0">
               {navItems.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                  className={`flex items-center space-x-2 md:space-x-3 px-3 py-2 rounded-lg text-left text-sm md:text-base whitespace-nowrap transition-colors ${
                     activeTab === item.id
                       ? 'bg-primary text-white'
                       : 'text-gray-600 hover:bg-gray-50'
@@ -185,8 +185,8 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          
-          <div className="px-6 py-4 border-t border-gray-200 mt-8">
+
+          <div className="hidden md:block px-6 py-4 border-t border-gray-200 mt-8">
             <div className="text-xs text-gray-500 mb-2">API Status</div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -198,7 +198,7 @@ export default function Dashboard() {
                 <div className={`w-2 h-2 rounded-full ${apiStatus.anthropic ? 'bg-green-500' : 'bg-red-500'}`}></div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-600">Gmail SMTP</span>
+                <span className="text-xs text-gray-600">Email</span>
                 <div className={`w-2 h-2 rounded-full ${apiStatus.email ? 'bg-green-500' : 'bg-red-500'}`}></div>
               </div>
             </div>
@@ -207,6 +207,17 @@ export default function Dashboard() {
 
         {/* Main Content Area */}
         <main className="flex-1 p-6">
+          {showOnboarding && (
+            <div className="mb-6">
+              <Onboarding
+                onNavigate={(tab) => {
+                  setActiveTab(tab);
+                  setShowOnboarding(false);
+                }}
+                onDismiss={() => setShowOnboarding(false)}
+              />
+            </div>
+          )}
           {activeTab === 'leadDiscovery' && <LeadDiscovery />}
           {activeTab === 'linkedinLeads' && <LinkedInLeads />}
           {activeTab === 'campaigns' && <CampaignBuilder />}
