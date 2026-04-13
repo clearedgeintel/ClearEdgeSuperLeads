@@ -1430,9 +1430,13 @@ export class DatabaseStorage implements IStorage {
     contentPrefix: string,
     workspaceId?: string | null
   ): Promise<VocInsight | undefined> {
+    // Escape LIKE wildcards (%, _, \) so user-controlled content can't
+    // manipulate the match pattern. Then wrap in %...% for substring match.
+    const escaped = contentPrefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+    const pattern = `%${escaped}%`;
     const conditions = [
       eq(vocInsights.insightType, insightType),
-      sql`${vocInsights.content} ilike ${'%' + contentPrefix + '%'}`,
+      sql`${vocInsights.content} ilike ${pattern}`,
     ];
     if (workspaceId) conditions.push(eq(vocInsights.workspaceId, workspaceId));
     const [row] = await db

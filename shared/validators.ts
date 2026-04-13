@@ -58,3 +58,14 @@ export const generateMessageSchema = z.object({
   enrollmentId: z.string().min(1),
   stepId: z.string().min(1),
 });
+
+export const updateCampaignSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  status: z.enum(['draft', 'active', 'paused', 'completed']).optional(),
+  tone: z.enum(['consultative', 'direct', 'curiosity-led']).optional(),
+  dailySendLimit: z.number().int().min(1).max(50).optional(),
+  maxTouches: z.number().int().min(1).max(10).optional(),
+  requireApproval: z.boolean().optional(),
+  emailTemplate: z.string().max(10_000).nullable().optional(),
+}).strict();

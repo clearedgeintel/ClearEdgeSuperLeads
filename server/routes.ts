@@ -34,6 +34,7 @@ import {
   createCampaignSchema,
   createCampaignStepSchema,
   generateMessageSchema,
+  updateCampaignSchema,
 } from "@shared/validators";
 import { PLAN_LIMITS, getPlanLimits, percentOf, type PlanTier } from "@shared/plans";
 import { setupFallbackAuth, requireAuth } from "./fallbackAuth";
@@ -799,7 +800,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/campaigns/:id', requireAuth, async (req, res) => {
+  app.patch('/api/campaigns/:id', requireAuth, validateBody(updateCampaignSchema), async (req, res) => {
     try {
       const campaign = await storage.updateCampaign(req.params.id, req.body ?? {});
       res.json({ success: true, data: campaign });
@@ -1937,6 +1938,10 @@ your recipients' jurisdictions.</p>`
   // Public unsubscribe — no auth required. Verifies HMAC-signed token,
   // adds the email to the suppression list, returns a plain HTML
   // confirmation page so recipients don't see a JSON blob.
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   app.get('/unsubscribe/:token', async (req, res) => {
     const email = verifyUnsubscribeToken(req.params.token);
     if (!email) {
@@ -1951,7 +1956,7 @@ your recipients' jurisdictions.</p>`
     }
     try {
       await storage.addSuppressionEntry({
-        workspaceId: null, // workspace-global unsubscribe — conservative default
+        workspaceId: null,
         email: email.toLowerCase(),
         domain: null,
         reason: 'unsubscribed',
@@ -1966,13 +1971,13 @@ your recipients' jurisdictions.</p>`
       });
     } catch (err) {
       console.error('Unsubscribe insert error:', err);
-      // Fall through — still show success so we don't leak internal errors.
     }
+    const safeEmail = escapeHtml(email);
     res.send(
       `<!doctype html><html><head><title>Unsubscribed</title></head>
        <body style="font-family: system-ui; max-width: 560px; margin: 80px auto; padding: 20px;">
          <h1>You're unsubscribed</h1>
-         <p><strong>${email}</strong> has been added to our suppression list. You will not
+         <p><strong>${safeEmail}</strong> has been added to our suppression list. You will not
          receive any further outreach from this workspace.</p>
          <p style="color: #666; font-size: 14px;">If you believe this is a mistake, please
          contact the sender directly.</p>
