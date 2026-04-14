@@ -3,6 +3,18 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startScheduler } from "./jobs/scheduler";
 
+// Process-level safety net. Third-party libraries (nodemailer, pg pools,
+// fetch streams) occasionally emit async errors that bypass our route-
+// level try/catch. Log them loudly but keep the server up — crashing the
+// whole process on an SMTP credential misconfig is hostile in dev and
+// unacceptable in prod.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -43,9 +55,12 @@ app.use((req, res, next) => {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
+    console.error('[express] unhandled route error', err);
+    if (!res.headersSent) {
+      res.status(status).json({ message });
+    }
+    // Don't re-throw — Express has no upstream error handler; re-throwing
+    // just produces an unhandledRejection and risks crashing the process.
   });
 
   // importantly only setup vite in development and after

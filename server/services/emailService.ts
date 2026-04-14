@@ -59,22 +59,31 @@ export class EmailService {
 
   constructor() {
     const sendgridKey = process.env.SENDGRID_API_KEY;
+    const gmailUser = process.env.GMAIL_USER || process.env.EMAIL_USER;
+    const gmailPass = process.env.GMAIL_PASSWORD || process.env.EMAIL_PASSWORD;
+
     if (sendgridKey) {
       sgMail.setApiKey(sendgridKey);
       this.provider = 'sendgrid';
       logger.info('[email] provider: sendgrid');
-    } else {
+    } else if (gmailUser && gmailPass) {
       this.provider = 'gmail';
       logger.warn(
         '[email] SENDGRID_API_KEY not set, falling back to Gmail SMTP (dev only)'
       );
       this.gmailTransporter = nodemailer.createTransport({
         service: 'gmail',
-        auth: {
-          user: process.env.GMAIL_USER || process.env.EMAIL_USER,
-          pass: process.env.GMAIL_PASSWORD || process.env.EMAIL_PASSWORD,
-        },
+        auth: { user: gmailUser, pass: gmailPass },
       });
+    } else {
+      // No credentials for either provider. Leave the service in a stubbed
+      // state so sendOutreachEmail throws a clear error instead of
+      // nodemailer crashing the process with an async EAUTH event
+      // (which bypasses try/catch because it fires from a TLS socket).
+      this.provider = 'gmail';
+      logger.warn(
+        '[email] no email credentials configured (set SENDGRID_API_KEY or GMAIL_USER + GMAIL_PASSWORD). sendOutreachEmail will throw until configured.'
+      );
     }
   }
 
@@ -197,8 +206,13 @@ export class EmailService {
     }
 
     // Gmail fallback (dev only)
+    if (!this.gmailTransporter) {
+      throw new Error(
+        'Email provider not configured. Set SENDGRID_API_KEY or GMAIL_USER + GMAIL_PASSWORD.'
+      );
+    }
     try {
-      const info = await this.gmailTransporter!.sendMail({
+      const info = await this.gmailTransporter.sendMail({
         from: process.env.GMAIL_USER || process.env.EMAIL_USER,
         to,
         subject,
@@ -252,8 +266,9 @@ export class EmailService {
       // SendGrid doesn't expose a ping endpoint; we trust the API key.
       return Boolean(process.env.SENDGRID_API_KEY);
     }
+    if (!this.gmailTransporter) return false;
     try {
-      await this.gmailTransporter!.verify();
+      await this.gmailTransporter.verify();
       return true;
     } catch (error) {
       logger.error({ err: error }, '[email] gmail verify failed');
