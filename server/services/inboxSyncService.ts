@@ -14,6 +14,7 @@ import { classifyReply, type ReplySentiment } from './replyClassifier';
 import { recordReplyForVersion } from './promptEngine';
 import { storeConversation } from './ragEngine';
 import { emit } from '../lib/eventEmitter';
+import { deliverWebhookEvent } from './webhookDeliveryService';
 import type { Lead } from '@shared/schema';
 
 export interface InboxSyncResult {
@@ -246,12 +247,24 @@ export class InboxSyncService {
         type: 'reply_received',
         data: { replies, classifications },
       });
+      // Phase 12 — outbound webhook fan-out (fire-and-forget).
+      if (workspaceId) {
+        void deliverWebhookEvent(workspaceId, 'lead.reply_received', {
+          replies,
+          classifications,
+        });
+      }
     }
     if (connectionsAccepted > 0) {
       emit(workspaceId, {
         type: 'connection_accepted',
         data: { connectionsAccepted },
       });
+      if (workspaceId) {
+        void deliverWebhookEvent(workspaceId, 'lead.connection_accepted', {
+          connectionsAccepted,
+        });
+      }
     }
 
     return { replies, connectionsAccepted, classifications };

@@ -19,6 +19,7 @@ import {
   auditLog,
   unipileAccounts,
   notifications,
+  webhookEndpoints,
   type User,
   type UnipileAccount,
   type Notification,
@@ -291,6 +292,88 @@ export class DatabaseStorage implements IStorage {
       .update(notifications)
       .set({ readAt: new Date() })
       .where(eq(notifications.id, id));
+  }
+
+  // ============================================================
+  // Phase 12 — Webhook endpoints CRUD
+  // ============================================================
+
+  async getWebhookEndpoints(workspaceId: string) {
+    return await db
+      .select()
+      .from(webhookEndpoints)
+      .where(eq(webhookEndpoints.workspaceId, workspaceId))
+      .orderBy(desc(webhookEndpoints.createdAt));
+  }
+
+  async getWebhookEndpoint(id: string) {
+    const [row] = await db
+      .select()
+      .from(webhookEndpoints)
+      .where(eq(webhookEndpoints.id, id))
+      .limit(1);
+    return row;
+  }
+
+  async createWebhookEndpoint(data: {
+    workspaceId: string;
+    url: string;
+    events: string[];
+    secret: string;
+  }) {
+    const [row] = await db
+      .insert(webhookEndpoints)
+      .values({ id: nanoid(), ...data, isActive: true })
+      .returning();
+    return row;
+  }
+
+  async updateWebhookEndpoint(
+    id: string,
+    updates: { url?: string; events?: string[]; isActive?: boolean }
+  ) {
+    const [row] = await db
+      .update(webhookEndpoints)
+      .set(updates)
+      .where(eq(webhookEndpoints.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteWebhookEndpoint(id: string): Promise<void> {
+    await db.delete(webhookEndpoints).where(eq(webhookEndpoints.id, id));
+  }
+
+  async getActiveWebhookEndpointsForEvent(workspaceId: string, event: string) {
+    const all = await db
+      .select()
+      .from(webhookEndpoints)
+      .where(
+        and(eq(webhookEndpoints.workspaceId, workspaceId), eq(webhookEndpoints.isActive, true))
+      );
+    // Filter in JS because events is jsonb — simpler than jsonb_contains for now.
+    return all.filter((e) => {
+      const evs = e.events as string[] | null;
+      return Array.isArray(evs) && evs.includes(event);
+    });
+  }
+
+  // Find a lead by email (workspace-scoped) — used by Calendly/Cal.com webhook
+  // to mark a lead as meeting_booked when a booking arrives.
+  async getLeadByEmail(email: string, workspaceId: string): Promise<Lead | undefined> {
+    const [row] = await db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.email, email.toLowerCase()), eq(leads.workspaceId, workspaceId)))
+      .limit(1);
+    return row;
+  }
+
+  async incrementCampaignMeetings(campaignId: string): Promise<void> {
+    await db
+      .update(campaigns)
+      .set({ totalMeetings: sql`${campaigns.totalMeetings} + 1`, updatedAt: new Date() })
+      .where(eq(campaigns.id, campaignId));
   }
 
   async markAllNotificationsRead(userId: string): Promise<number> {
@@ -1539,6 +1622,35 @@ export class DatabaseStorage implements IStorage {
       .values({ id: nanoid(), ...entry })
       .returning();
     return row;
+  }
+
+  /**
+   * Filterable audit log reader for the Settings → Audit Log panel.
+   * Returns entries joined with the acting user's email so the UI
+   * doesn't need a second lookup per row. Admin-only at the route
+   * layer — the scope is always the caller's workspace.
+   */
+  async getAuditLog(opts: {
+    workspaceId: string;
+    action?: string;
+    userId?: string;
+    since?: Date;
+    limit?: number;
+  }): Promise<Array<AuditLogEntry & { userEmail: string | null }>> {
+    const conditions = [eq(auditLog.workspaceId, opts.workspaceId)];
+    if (opts.action) conditions.push(eq(auditLog.action, opts.action));
+    if (opts.userId) conditions.push(eq(auditLog.userId, opts.userId));
+    if (opts.since) conditions.push(gte(auditLog.createdAt, opts.since));
+
+    const rows = await db
+      .select({ entry: auditLog, userEmail: users.email })
+      .from(auditLog)
+      .leftJoin(users, eq(auditLog.userId, users.id))
+      .where(and(...conditions))
+      .orderBy(desc(auditLog.createdAt))
+      .limit(opts.limit ?? 100);
+
+    return rows.map((r) => ({ ...r.entry, userEmail: r.userEmail }));
   }
 
   /**

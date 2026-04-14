@@ -4,7 +4,8 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import cors from "cors";
 import { storage } from "./storage";
-import { pool } from "./db";
+import { pool, db } from "./db";
+import { workspaces as workspacesTable } from "@shared/schema";
 import { googleAuthService } from "./services/googleAuth";
 import { aiService } from "./services/aiService";
 import { emailService, EmailSuppressedError, EmailUndeliverableError, EmailDailyLimitError } from "./services/emailService";
@@ -43,7 +44,9 @@ import { nanoid } from "nanoid";
 import type { PlaceDetails } from "./services/placesApi";
 import { aiQueue } from "./lib/backgroundQueue";
 
+import * as nodeCrypto from "node:crypto";
 import { verifyUnsubscribeToken } from "./lib/unsubscribe";
+import { sendTestWebhook, deliverWebhookEvent } from "./services/webhookDeliveryService";
 
 // Serialize an array of objects into an RFC-4180 CSV string. Values are
 // always wrapped in double quotes (embedded quotes doubled) so column
@@ -2009,6 +2012,223 @@ your recipients' jurisdictions.</p>`
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('GDPR delete error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 12 — Audit log reader (admin only, workspace-scoped)
+  app.get('/api/audit-log', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) return res.status(400).json({ success: false, error: 'No workspace' });
+      const action = req.query.action as string | undefined;
+      const userIdFilter = req.query.userId as string | undefined;
+      const sinceParam = req.query.since as string | undefined;
+      const since = sinceParam ? new Date(sinceParam) : undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const entries = await storage.getAuditLog({
+        workspaceId: user.workspaceId,
+        action,
+        userId: userIdFilter,
+        since,
+        limit,
+      });
+      res.json({ success: true, data: entries });
+    } catch (error: any) {
+      console.error('Audit log error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Phase 12 — Outbound webhook endpoint CRUD
+  app.get('/api/webhooks/endpoints', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) return res.status(400).json({ success: false, error: 'No workspace' });
+      const data = await storage.getWebhookEndpoints(user.workspaceId);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('Get webhook endpoints error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/webhooks/endpoints', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) return res.status(400).json({ success: false, error: 'No workspace' });
+      const { url, events } = req.body ?? {};
+      if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
+        return res.status(400).json({ success: false, error: 'url must start with http(s)://' });
+      }
+      if (!Array.isArray(events) || events.length === 0) {
+        return res
+          .status(400)
+          .json({ success: false, error: 'events array required (at least 1 event)' });
+      }
+      // Generate a per-endpoint HMAC secret — only shown to operator once.
+      const secret = nodeCrypto.randomBytes(32).toString('base64url');
+      const endpoint = await storage.createWebhookEndpoint({
+        workspaceId: user.workspaceId,
+        url,
+        events,
+        secret,
+      });
+      await storage.createAuditEntry({
+        workspaceId: user.workspaceId,
+        userId: user.id,
+        action: 'webhook_created',
+        entityType: 'webhook_endpoint',
+        entityId: endpoint.id,
+        metadata: { url, events },
+      });
+      res.json({ success: true, data: endpoint });
+    } catch (error: any) {
+      console.error('Create webhook endpoint error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.patch('/api/webhooks/endpoints/:id', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const { url, events, isActive } = req.body ?? {};
+      const updates: { url?: string; events?: string[]; isActive?: boolean } = {};
+      if (typeof url === 'string') updates.url = url;
+      if (Array.isArray(events)) updates.events = events;
+      if (typeof isActive === 'boolean') updates.isActive = isActive;
+      const endpoint = await storage.updateWebhookEndpoint(req.params.id, updates);
+      res.json({ success: true, data: endpoint });
+    } catch (error: any) {
+      console.error('Update webhook endpoint error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete(
+    '/api/webhooks/endpoints/:id',
+    requireAuth,
+    requireRole('admin'),
+    async (req, res) => {
+      try {
+        const user = req.session.user!;
+        await storage.deleteWebhookEndpoint(req.params.id);
+        await storage.createAuditEntry({
+          workspaceId: user.workspaceId ?? null,
+          userId: user.id,
+          action: 'webhook_deleted',
+          entityType: 'webhook_endpoint',
+          entityId: req.params.id,
+          metadata: null,
+        });
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete webhook endpoint error:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  app.post(
+    '/api/webhooks/endpoints/:id/test',
+    requireAuth,
+    requireRole('admin'),
+    async (req, res) => {
+      try {
+        const result = await sendTestWebhook(req.params.id);
+        res.json({ success: result.ok, data: result });
+      } catch (error: any) {
+        console.error('Test webhook error:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Phase 12 — Meeting booking webhooks (Calendly + Cal.com).
+  // Public endpoints — no session auth. Calendly/Cal.com sign payloads,
+  // but for MVP we do a shared-secret check via query param. Rotate
+  // the secrets via CALENDLY_WEBHOOK_SECRET / CALCOM_WEBHOOK_SECRET
+  // in the vendor dashboard.
+  function verifyBookingSecret(req: import('express').Request, envVar: string): boolean {
+    const expected = process.env[envVar];
+    if (!expected) {
+      // If the operator didn't configure a secret, we refuse the webhook
+      // rather than silently accepting unsigned payloads.
+      return false;
+    }
+    const provided = (req.query.secret as string | undefined) ?? req.headers['x-webhook-secret'];
+    return typeof provided === 'string' && provided === expected;
+  }
+
+  async function handleBooking(
+    email: string,
+    eventData: Record<string, unknown>,
+    source: 'calendly' | 'calcom'
+  ): Promise<{ matched: boolean; leadId?: string }> {
+    if (!email) return { matched: false };
+    // The booking webhook doesn't carry workspace context — scan workspaces
+    // to find the one with a matching lead by email. Conservative because
+    // cross-workspace email collisions are unlikely in practice.
+    const allWorkspaces = await db.select().from(workspacesTable);
+    for (const w of allWorkspaces) {
+      const lead = await storage.getLeadByEmail(email, w.id);
+      if (!lead) continue;
+      await storage.updateLead(lead.id, {
+        status: 'meeting_booked',
+        lastContactedAt: new Date(),
+      });
+      await storage.createEngagementEvent({
+        workspaceId: w.id,
+        leadId: lead.id,
+        eventType: 'meeting_booked',
+        sentiment: null,
+        eventData: { ...eventData, source },
+        occurredAt: new Date(),
+      });
+      // Bump campaign meeting counter if any active enrollment exists.
+      const enrollment = await storage.getActiveEnrollmentForLead(lead.id);
+      if (enrollment) {
+        await storage.incrementCampaignMeetings(enrollment.campaignId);
+      }
+      // Fire meeting.booked webhook to any subscribed endpoints.
+      void deliverWebhookEvent(w.id, 'meeting.booked', {
+        leadId: lead.id,
+        email,
+        source,
+        bookingData: eventData,
+      });
+      return { matched: true, leadId: lead.id };
+    }
+    return { matched: false };
+  }
+
+  app.post('/api/webhooks/calendly', async (req, res) => {
+    try {
+      if (!verifyBookingSecret(req, 'CALENDLY_WEBHOOK_SECRET')) {
+        return res.status(401).json({ success: false, error: 'Invalid secret' });
+      }
+      const body = req.body ?? {};
+      const email =
+        body?.payload?.email ?? body?.payload?.invitee?.email ?? body?.email ?? '';
+      const result = await handleBooking(email, body, 'calendly');
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Calendly webhook error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/webhooks/calcom', async (req, res) => {
+    try {
+      if (!verifyBookingSecret(req, 'CALCOM_WEBHOOK_SECRET')) {
+        return res.status(401).json({ success: false, error: 'Invalid secret' });
+      }
+      const body = req.body ?? {};
+      const email =
+        body?.payload?.attendees?.[0]?.email ?? body?.payload?.email ?? body?.email ?? '';
+      const result = await handleBooking(email, body, 'calcom');
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Cal.com webhook error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

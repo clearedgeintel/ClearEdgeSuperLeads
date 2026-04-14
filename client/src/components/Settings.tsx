@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { SettingsIcon, Save, DollarSign, Zap } from "lucide-react";
 import SuppressionList from "./SuppressionList";
+import AuditLog from "./AuditLog";
+import WebhookEndpoints from "./WebhookEndpoints";
 import MembersPanel from "./MembersPanel";
 import BillingPanel from "./BillingPanel";
 
@@ -200,6 +202,12 @@ export default function Settings() {
 
       {/* Suppression list (Phase 7 — CAN-SPAM/GDPR compliance) */}
       <SuppressionList />
+
+      {/* Outbound webhooks (Phase 12) */}
+      <WebhookEndpoints />
+
+      {/* Audit log (Phase 12) */}
+      <AuditLog />
 
       {/* Phase 8 — Email warm-up guidance */}
       <Card>
