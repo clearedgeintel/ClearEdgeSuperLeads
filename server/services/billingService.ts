@@ -11,7 +11,7 @@
 //   2. createPortalSession(workspaceId) — returns a Stripe Customer
 //      Portal URL where the operator can update card, cancel, or
 //      change plans outside the app.
-//   3. handleWebhook(payload, signature) — verifies SendGrid-style
+//   3. handleWebhook(payload, signature) — verifies the Stripe
 //      signature, routes events (checkout.session.completed,
 //      customer.subscription.updated, invoice.payment_failed) to
 //      workspace plan/counter mutations.

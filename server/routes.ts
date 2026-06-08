@@ -29,6 +29,7 @@ import { linkedinLimiter, aiLimiter, dispatchLimiter } from "./middleware/rateLi
 import { validateBody } from "./middleware/validate";
 import { requireWorkspace } from "./middleware/requireWorkspace";
 import { requireRole } from "./middleware/requireRole";
+import { makeInviteUrl, verifyInviteToken } from "./lib/inviteToken";
 import {
   linkedinSearchSchema,
   linkedinSaveProfilesSchema,
@@ -149,9 +150,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware
   // CORS only needed if frontend is on a different origin. Same-origin
   // deployments (Railway, Vercel) don't need it.
+  // Reflecting any origin (`true`) together with credentials:true is an unsafe
+  // CORS posture — pin to the configured app origin and fall back to localhost
+  // rather than wildcarding if APP_URL is somehow unset in prod.
   app.use(cors({
     origin: process.env.NODE_ENV === 'production'
-      ? (process.env.APP_URL || true)
+      ? (process.env.APP_URL || 'http://localhost:5000')
       : 'http://localhost:5000',
     credentials: true
   }));
@@ -185,12 +189,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ message: "Logged out successfully" });
     });
-  });
-
-  // Test route to verify server routing
-  app.get('/api/test-callback', (req, res) => {
-    console.log('Test callback reached with query:', req.query);
-    res.json({ message: 'Test callback works', query: req.query });
   });
 
   // Setup fallback authentication
@@ -246,12 +244,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Add a simple test route to verify Google can reach us
-  app.get('/auth/test', (req, res) => {
-    console.log('Test auth route reached:', req.query);
-    res.json({ message: 'Auth test route working', query: req.query });
-  });
-
   app.get('/api/auth/google/callback', async (req, res) => {
     try {
       console.log('Google callback received:', req.query);
@@ -275,7 +267,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userInfo = await googleAuthService.getUserInfo(tokens.access_token!);
       console.log('User info received:', { id: userInfo.id, email: userInfo.email });
 
-      // Store user in database
+      // Resolve a pending invite (if this login came from an invite link).
+      // Only honor it when the invite is still pending, unexpired, and was
+      // issued to the same email the user just authenticated with — otherwise
+      // anyone with a link could join as a different address.
+      let inviteWorkspaceId: string | undefined;
+      let inviteRole: string | undefined;
+      let acceptedInviteId: string | undefined;
+      const pendingInviteId = req.session.pendingInviteId;
+      if (pendingInviteId) {
+        const invite = await storage.getInvitation(pendingInviteId);
+        const stillValid =
+          invite &&
+          invite.status === 'pending' &&
+          (!invite.expiresAt || new Date(invite.expiresAt).getTime() >= Date.now()) &&
+          invite.email.toLowerCase() === (userInfo.email || '').toLowerCase();
+        if (stillValid) {
+          inviteWorkspaceId = invite!.workspaceId;
+          inviteRole = invite!.role;
+          acceptedInviteId = invite!.id;
+        }
+        delete req.session.pendingInviteId;
+      }
+
+      // Store user in database. When accepting an invite we pass the invited
+      // workspace + role up front, so upsertUser's auto-personal-workspace
+      // branch is skipped (no orphaned workspace) and an existing user is
+      // moved into the inviting workspace.
       const user = await storage.upsertUser({
         id: userInfo.id!,
         email: userInfo.email!,
@@ -285,7 +303,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         googleAccessToken: tokens.access_token!,
         googleRefreshToken: tokens.refresh_token || null,
         tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        ...(inviteWorkspaceId ? { workspaceId: inviteWorkspaceId, role: inviteRole } : {}),
       });
+
+      if (acceptedInviteId && inviteWorkspaceId) {
+        await storage.markInvitationAccepted(acceptedInviteId);
+        await storage.createAuditEntry({
+          workspaceId: inviteWorkspaceId,
+          userId: user.id,
+          action: 'invite_accepted',
+          entityType: 'invitation',
+          entityId: acceptedInviteId,
+          metadata: { email: user.email, role: inviteRole },
+        });
+      }
 
       console.log('User stored in database:', user.id);
 
@@ -293,7 +324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.user = user;
       console.log('User stored in session, redirecting to home...');
 
-      res.redirect('/?success=login');
+      res.redirect(acceptedInviteId ? '/?success=invite_accepted' : '/?success=login');
     } catch (error: any) {
       console.error('OAuth callback error:', error.message || error);
       res.redirect('/?error=auth_failed');
@@ -1377,6 +1408,168 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
+  // ── Workspace invitations ──────────────────────────────────
+  // Invite a teammate by email. Admin only. Creates a pending invitation
+  // row and emails a signed accept link. The invitee accepts by clicking
+  // the link and logging in with Google (see GET /accept-invite/:token).
+  app.post('/api/workspace/invitations', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const { email, role } = req.body ?? {};
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        return res.status(400).json({ success: false, error: 'A valid email is required' });
+      }
+      const inviteRole = role === 'admin' ? 'admin' : 'member';
+      const normalizedEmail = email.toLowerCase().trim();
+
+      // Don't invite someone who is already a member of this workspace.
+      const members = await storage.getWorkspaceMembers(user.workspaceId);
+      if (members.some((m) => m.email?.toLowerCase() === normalizedEmail)) {
+        return res
+          .status(409)
+          .json({ success: false, error: 'That person is already a member of this workspace' });
+      }
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      const invitation = await storage.createInvitation({
+        workspaceId: user.workspaceId,
+        email: normalizedEmail,
+        role: inviteRole,
+        invitedBy: user.id,
+        expiresAt,
+      });
+
+      const inviteUrl = makeInviteUrl(invitation.id);
+      const workspace = await storage.getWorkspace(user.workspaceId);
+      const workspaceName = workspace?.name || 'a ClearEdge workspace';
+      const inviterName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'A teammate';
+
+      let emailSent = false;
+      try {
+        const html = `
+          <p>${inviterName} invited you to join <strong>${workspaceName}</strong> on ClearEdge as ${inviteRole === 'admin' ? 'an admin' : 'a member'}.</p>
+          <p><a href="${inviteUrl}">Accept the invitation</a> — you'll sign in with Google to get started.</p>
+          <p style="font-size:12px;color:#6b7280;">This invite expires in 7 days. If you weren't expecting it, you can ignore this email.</p>`;
+        await emailService.sendTransactionalEmail(
+          normalizedEmail,
+          `You're invited to join ${workspaceName} on ClearEdge`,
+          html,
+        );
+        emailSent = true;
+      } catch (mailErr: any) {
+        // Email transport may be unconfigured (dev). The invitation row still
+        // exists and the link is returned so the inviter can share it manually.
+        console.error('Invite email failed:', mailErr.message);
+      }
+
+      await storage.createAuditEntry({
+        workspaceId: user.workspaceId,
+        userId: user.id,
+        action: 'invite_created',
+        entityType: 'invitation',
+        entityId: invitation.id,
+        metadata: { email: normalizedEmail, role: inviteRole, emailSent },
+      });
+
+      res.json({ success: true, data: { invitation, inviteUrl, emailSent } });
+    } catch (error: any) {
+      console.error('Create invitation error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get('/api/workspace/invitations', requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const user = req.session.user!;
+      if (!user.workspaceId) {
+        return res.status(404).json({ success: false, error: 'No workspace' });
+      }
+      const pending = await storage.getPendingInvitations(user.workspaceId);
+      res.json({ success: true, data: pending });
+    } catch (error: any) {
+      console.error('List invitations error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete(
+    '/api/workspace/invitations/:id',
+    requireAuth,
+    requireRole('admin'),
+    async (req, res) => {
+      try {
+        const user = req.session.user!;
+        const invitation = await storage.getInvitation(req.params.id);
+        if (!invitation || invitation.workspaceId !== user.workspaceId) {
+          return res.status(404).json({ success: false, error: 'Invitation not found' });
+        }
+        await storage.revokeInvitation(invitation.id);
+        await storage.createAuditEntry({
+          workspaceId: user.workspaceId!,
+          userId: user.id,
+          action: 'invite_revoked',
+          entityType: 'invitation',
+          entityId: invitation.id,
+          metadata: { email: invitation.email },
+        });
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Revoke invitation error:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Public invite landing. Verifies the signed token, then either processes
+  // the invite immediately (if already logged in) or stashes it in the session
+  // and sends the visitor through Google login — the OAuth callback consumes
+  // req.session.pendingInviteId to place the new user in the invited workspace.
+  app.get('/accept-invite/:token', async (req, res) => {
+    const invitationId = verifyInviteToken(req.params.token);
+    if (!invitationId) {
+      return res.redirect('/?error=invalid_invite');
+    }
+    const invitation = await storage.getInvitation(invitationId);
+    if (!invitation || invitation.status !== 'pending') {
+      return res.redirect('/?error=invite_unavailable');
+    }
+    if (invitation.expiresAt && new Date(invitation.expiresAt).getTime() < Date.now()) {
+      return res.redirect('/?error=invite_expired');
+    }
+
+    // Already logged in: apply immediately if the emails match.
+    const sessionUser = req.session.user;
+    if (sessionUser) {
+      if (sessionUser.email?.toLowerCase() !== invitation.email.toLowerCase()) {
+        return res.redirect('/?error=invite_email_mismatch');
+      }
+      const updated = await storage.upsertUser({
+        id: sessionUser.id,
+        email: sessionUser.email,
+        workspaceId: invitation.workspaceId,
+        role: invitation.role,
+      });
+      await storage.markInvitationAccepted(invitation.id);
+      await storage.createAuditEntry({
+        workspaceId: invitation.workspaceId,
+        userId: sessionUser.id,
+        action: 'invite_accepted',
+        entityType: 'invitation',
+        entityId: invitation.id,
+        metadata: { email: invitation.email, role: invitation.role },
+      });
+      req.session.user = updated;
+      return res.redirect('/?success=invite_accepted');
+    }
+
+    // Not logged in: remember the invite and send them through Google login.
+    req.session.pendingInviteId = invitation.id;
+    return res.redirect('/api/auth/google');
+  });
+
   // Phase 9.5 — Unipile multi-account management (Agency tier).
   // Routes mount for every tier but enforcement lives at the plan
   // level: free/solo plans are capped at 1 Unipile account via the
@@ -1456,7 +1649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     'linkedin_dispatch_limit_hourly',
     'email_dispatch_limit_hourly',
     'linkedin_compliance_mode',
-    'sendgrid_from_email',
+    'email_from_address',
     'slack_webhook_url',
   ] as const;
   type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -1527,6 +1720,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error('Daily usage error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Live Resend sending-domain authentication status for the Settings UI.
+  // Read-only; not persisted to app_config (it reflects live Resend state).
+  app.get('/api/email/domain-status', requireAuth, async (_req, res) => {
+    try {
+      const status = await emailService.getDomainAuthStatus();
+      res.json({ success: true, data: status });
+    } catch (error: any) {
+      console.error('Domain status error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -1728,7 +1933,7 @@ outreach will be sent from that workspace.</p>
 
 <h2>Third-party services</h2>
 <p>ClearEdge Outreach integrates with Anthropic (Claude), Unipile (LinkedIn automation),
-Google (OAuth + Places API + Custom Search), SendGrid (email delivery), and Supabase
+Google (OAuth + Places API + Custom Search), Resend (email delivery), and Supabase
 (managed PostgreSQL). Each vendor has its own privacy policy; operators are responsible
 for ensuring their use of the Service is compatible with the terms of those vendors.</p>
 
@@ -1773,7 +1978,7 @@ any consequences of sending them.</p>
 
 <h2>Service availability</h2>
 <p>The Service is provided "as is" without warranty of uptime, deliverability, or
-LinkedIn acceptance rates. Third-party outages (Anthropic, Unipile, SendGrid, Google)
+LinkedIn acceptance rates. Third-party outages (Anthropic, Unipile, Resend, Google)
 can and do affect availability.</p>
 
 <h2>Termination</h2>
@@ -1783,138 +1988,116 @@ using the Service at any time and request full workspace data export before dele
 
 <h2>Compliance</h2>
 <p>It is your responsibility to add your physical mailing address to the email footer
-(via Settings → SendGrid from address), to maintain the suppression list in good faith,
+(via Settings → From address), to maintain the suppression list in good faith,
 and to comply with all applicable anti-spam and data-protection laws in your own and
 your recipients' jurisdictions.</p>`
       )
     );
   });
 
-  // Phase 8 — SendGrid event webhook. Handles bounce, spamreport,
-  // unsubscribe (backup to our one-click), open, and click. Signature
-  // verification per SendGrid's Event Webhook docs:
-  //   1. ecdsa-with-SHA256 over (timestamp + rawBody)
-  //   2. Public key from SENDGRID_WEBHOOK_PUBLIC_KEY env
-  // We skip verification in dev when the key isn't set — otherwise a
-  // misconfigured local env silently drops all events.
-  app.post('/api/webhooks/sendgrid', express.raw({ type: 'application/json' }), async (req, res) => {
+  // Resend event webhook. Handles bounce, complaint (spam), open, and click.
+  // Resend signs webhooks Svix-style: HMAC-SHA256 over `${id}.${timestamp}.${body}`
+  // keyed by the base64 secret (RESEND_WEBHOOK_SECRET, "whsec_..."), with the
+  // signature in the svix-signature header (space-separated "v1,<b64>" entries).
+  // We verify manually (no svix dependency). Verification is skipped in dev when
+  // the secret isn't set — otherwise a misconfigured local env drops all events.
+  app.post('/api/webhooks/resend', express.raw({ type: 'application/json' }), async (req, res) => {
     try {
       const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
-      const publicKey = process.env.SENDGRID_WEBHOOK_PUBLIC_KEY;
+      const secret = process.env.RESEND_WEBHOOK_SECRET;
 
-      if (publicKey) {
-        const signature = req.header('X-Twilio-Email-Event-Webhook-Signature');
-        const timestamp = req.header('X-Twilio-Email-Event-Webhook-Timestamp');
-        if (!signature || !timestamp) {
+      if (secret) {
+        const svixId = req.header('svix-id');
+        const svixTimestamp = req.header('svix-timestamp');
+        const svixSignature = req.header('svix-signature');
+        if (!svixId || !svixTimestamp || !svixSignature) {
           return res.status(401).json({ success: false, error: 'Missing signature headers' });
         }
         try {
           const crypto = await import('crypto');
-          const verifier = crypto.createVerify('sha256');
-          verifier.update(timestamp + rawBody.toString());
-          const valid = verifier.verify(
-            { key: publicKey, format: 'pem' },
-            signature,
-            'base64'
-          );
-          if (!valid) {
+          const secretBytes = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');
+          const signedContent = `${svixId}.${svixTimestamp}.${rawBody.toString()}`;
+          const expected = crypto.createHmac('sha256', secretBytes).update(signedContent).digest('base64');
+          const expectedBuf = Buffer.from(expected);
+          // svix-signature is a space-separated list of "v1,<base64sig>".
+          const passed = svixSignature.split(' ').some((part) => {
+            const sig = part.includes(',') ? part.split(',')[1] : part;
+            const sigBuf = Buffer.from(sig);
+            return sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf);
+          });
+          if (!passed) {
             return res.status(401).json({ success: false, error: 'Invalid signature' });
           }
         } catch (err) {
-          console.error('SendGrid webhook signature verify error:', err);
+          console.error('Resend webhook signature verify error:', err);
           return res.status(401).json({ success: false, error: 'Signature verification failed' });
         }
       }
 
-      const events = JSON.parse(rawBody.toString()) as Array<{
-        event: string;
-        email: string;
-        timestamp: number;
-        sg_event_id?: string;
-        emailId?: string;
-        campaignId?: string;
-        workspaceId?: string;
-        reason?: string;
-        type?: string;
-      }>;
-
-      for (const ev of events) {
-        try {
-          await handleSendgridEvent(ev);
-        } catch (err) {
-          console.error('SendGrid event handler error:', { ev: ev.event, err });
-        }
+      const event = JSON.parse(rawBody.toString());
+      try {
+        await handleResendEvent(event);
+      } catch (err) {
+        console.error('Resend event handler error:', { type: event?.type, err });
       }
 
-      res.json({ success: true, processed: events.length });
+      res.json({ success: true });
     } catch (error: any) {
-      console.error('SendGrid webhook error:', error);
+      console.error('Resend webhook error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
 
-  async function handleSendgridEvent(ev: {
-    event: string;
-    email: string;
-    timestamp: number;
-    emailId?: string;
-    campaignId?: string;
-    workspaceId?: string;
-    reason?: string;
-    type?: string;
+  async function handleResendEvent(event: {
+    type: string;
+    created_at?: string;
+    data?: {
+      to?: string[];
+      created_at?: string;
+      tags?: Record<string, string> | Array<{ name: string; value: string }>;
+      bounce?: { type?: string };
+    };
   }) {
-    const ts = new Date(ev.timestamp * 1000);
-    const email = ev.email.toLowerCase();
+    const data = event.data ?? {};
+    const recipient = Array.isArray(data.to) ? data.to[0] : undefined;
+    if (!recipient) return;
+    const email = recipient.toLowerCase();
+    const ts = new Date(event.created_at ?? data.created_at ?? Date.now());
 
-    // Find the outreach_emails row — prefer the customArg id, fall back
-    // to latest-by-recipient.
-    const row =
-      (ev.emailId && (await storage.getLatestOutreachEmailByRecipient(email))) ||
-      (await storage.getLatestOutreachEmailByRecipient(email));
+    // Tags carry our metadata; Resend returns them as an object map, but
+    // tolerate the array form too.
+    const tags: Record<string, string> = Array.isArray(data.tags)
+      ? Object.fromEntries(data.tags.map((t) => [t.name, t.value]))
+      : (data.tags ?? {});
+    const workspaceId = tags.workspace_id && tags.workspace_id !== 'none' ? tags.workspace_id : null;
 
-    switch (ev.event) {
-      case 'bounce': {
+    const row = await storage.getLatestOutreachEmailByRecipient(email);
+
+    switch (event.type) {
+      case 'email.bounced': {
         if (row) await storage.updateOutreachEmailStatus(row.id, 'bounced', ts);
         if (row?.leadId) await storage.markLeadEmailStatus(row.leadId, 'bounced');
-        // Hard bounce → permanent suppression; soft bounce gets one free pass.
-        if (ev.type === 'hard') {
-          await storage.addSuppressionEntry({
-            workspaceId: ev.workspaceId ?? null,
-            email,
-            domain: null,
-            reason: 'bounced',
-          });
+        // Permanent bounce → suppress; transient/undetermined gets one free pass.
+        const bounceType = (data.bounce?.type ?? '').toLowerCase();
+        if (bounceType === 'permanent') {
+          await storage.addSuppressionEntry({ workspaceId, email, domain: null, reason: 'bounced' });
         }
         break;
       }
-      case 'spamreport': {
+      case 'email.complained': {
         if (row) await storage.updateOutreachEmailStatus(row.id, 'spam', ts);
-        await storage.addSuppressionEntry({
-          workspaceId: ev.workspaceId ?? null,
-          email,
-          domain: null,
-          reason: 'spam_report',
-        });
+        await storage.addSuppressionEntry({ workspaceId, email, domain: null, reason: 'spam_report' });
         break;
       }
-      case 'unsubscribe': {
-        await storage.addSuppressionEntry({
-          workspaceId: ev.workspaceId ?? null,
-          email,
-          domain: null,
-          reason: 'unsubscribed',
-        });
-        break;
-      }
-      case 'open': {
+      case 'email.opened': {
         if (row) await storage.updateOutreachEmailStatus(row.id, 'opened', ts);
         break;
       }
-      case 'click': {
+      case 'email.clicked': {
         if (row) await storage.updateOutreachEmailStatus(row.id, 'clicked', ts);
         break;
       }
-      // 'delivered', 'processed', 'deferred', 'dropped' — we don't act on these
+      // 'email.sent', 'email.delivered', 'email.delivery_delayed' — no action.
       default:
         break;
     }
@@ -1922,7 +2105,7 @@ your recipients' jurisdictions.</p>`
 
   // Open tracking pixel fallback — returns a 1x1 transparent GIF and
   // updates outreach_emails.opened_at. Defense-in-depth against mail
-  // clients that strip SendGrid's native open tracking pixel.
+  // clients that strip the provider's native open tracking pixel.
   const TRANSPARENT_GIF = Buffer.from(
     'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
     'base64'

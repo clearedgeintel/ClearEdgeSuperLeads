@@ -20,8 +20,10 @@ import {
   unipileAccounts,
   notifications,
   webhookEndpoints,
+  invitations,
   type User,
   type UnipileAccount,
+  type Invitation,
   type Notification,
   type UpsertUser,
   type Lead,
@@ -224,6 +226,53 @@ export class DatabaseStorage implements IStorage {
       .update(users)
       .set({ workspaceId: null, updatedAt: new Date() })
       .where(eq(users.id, userId));
+  }
+
+  // Invitations (workspace member invites)
+  async createInvitation(data: {
+    workspaceId: string;
+    email: string;
+    role: string;
+    invitedBy: string | null;
+    expiresAt: Date;
+  }): Promise<Invitation> {
+    const [row] = await db
+      .insert(invitations)
+      .values({
+        id: nanoid(),
+        workspaceId: data.workspaceId,
+        email: data.email.toLowerCase(),
+        role: data.role,
+        invitedBy: data.invitedBy,
+        status: 'pending',
+        expiresAt: data.expiresAt,
+      })
+      .returning();
+    return row;
+  }
+
+  async getInvitation(id: string): Promise<Invitation | undefined> {
+    const [row] = await db.select().from(invitations).where(eq(invitations.id, id));
+    return row;
+  }
+
+  async getPendingInvitations(workspaceId: string): Promise<Invitation[]> {
+    return await db
+      .select()
+      .from(invitations)
+      .where(and(eq(invitations.workspaceId, workspaceId), eq(invitations.status, 'pending')))
+      .orderBy(desc(invitations.createdAt));
+  }
+
+  async markInvitationAccepted(id: string): Promise<void> {
+    await db
+      .update(invitations)
+      .set({ status: 'accepted', acceptedAt: new Date() })
+      .where(eq(invitations.id, id));
+  }
+
+  async revokeInvitation(id: string): Promise<void> {
+    await db.update(invitations).set({ status: 'revoked' }).where(eq(invitations.id, id));
   }
 
   // Unipile accounts (Phase 9.5 — Agency multi-account)
@@ -1286,8 +1335,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Find the most recent outreach_emails row for a recipient so a
-  // SendGrid webhook lacking customArgs can still credit the event
-  // back to the right send.
+  // provider webhook (Resend) can credit the event back to the right
+  // send by recipient address.
   async getLatestOutreachEmailByRecipient(
     email: string
   ): Promise<OutreachEmail | undefined> {
