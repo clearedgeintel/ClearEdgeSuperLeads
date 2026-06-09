@@ -35,8 +35,11 @@ jobs:
       - name: Typecheck
         run: npm run check
 
+      # Unit tests only. The lifecycle.test.ts integration suite hits a real
+      # Supabase DB (DATABASE_URL from .env) and does destructive cleanup, so it
+      # runs locally/manually, not in CI. test:ci excludes it.
       - name: Test
-        run: npm test
+        run: npm run test:ci
         env:
           NODE_ENV: test
 

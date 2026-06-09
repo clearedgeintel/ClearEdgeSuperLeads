@@ -16,6 +16,7 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "test": "jest",
+    "test:ci": "jest --testPathIgnorePatterns node_modules lifecycle",
     "test:coverage": "jest --coverage",
     "prepare": "husky",
     "db:push": "dotenv -e .env -- drizzle-kit push"
