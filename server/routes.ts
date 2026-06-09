@@ -274,6 +274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let inviteWorkspaceId: string | undefined;
       let inviteRole: string | undefined;
       let acceptedInviteId: string | undefined;
+      let inviteBlockedExistingMember = false;
       const pendingInviteId = req.session.pendingInviteId;
       if (pendingInviteId) {
         const invite = await storage.getInvitation(pendingInviteId);
@@ -283,9 +284,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (!invite.expiresAt || new Date(invite.expiresAt).getTime() >= Date.now()) &&
           invite.email.toLowerCase() === (userInfo.email || '').toLowerCase();
         if (stillValid) {
-          inviteWorkspaceId = invite!.workspaceId;
-          inviteRole = invite!.role;
-          acceptedInviteId = invite!.id;
+          // Don't silently move/demote a user who already belongs to a different
+          // workspace — that would orphan their existing workspace + data.
+          const existing = await storage.getUser(userInfo.id!);
+          if (existing?.workspaceId && existing.workspaceId !== invite!.workspaceId) {
+            inviteBlockedExistingMember = true;
+          } else {
+            inviteWorkspaceId = invite!.workspaceId;
+            inviteRole = invite!.role;
+            acceptedInviteId = invite!.id;
+          }
         }
         delete req.session.pendingInviteId;
       }
@@ -324,7 +332,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.user = user;
       console.log('User stored in session, redirecting to home...');
 
-      res.redirect(acceptedInviteId ? '/?success=invite_accepted' : '/?success=login');
+      res.redirect(
+        acceptedInviteId
+          ? '/?success=invite_accepted'
+          : inviteBlockedExistingMember
+            ? '/?error=invite_existing_member'
+            : '/?success=login',
+      );
     } catch (error: any) {
       console.error('OAuth callback error:', error.message || error);
       res.redirect('/?error=auth_failed');
@@ -1444,8 +1458,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const inviteUrl = makeInviteUrl(invitation.id);
       const workspace = await storage.getWorkspace(user.workspaceId);
-      const workspaceName = workspace?.name || 'a ClearEdge workspace';
-      const inviterName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'A teammate';
+      // Escape user-controlled fields before interpolating into the email HTML.
+      const esc = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const workspaceName = esc(workspace?.name || 'a ClearEdge workspace');
+      const inviterName = esc(
+        [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'A teammate',
+      );
 
       let emailSent = false;
       try {
@@ -1545,6 +1564,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (sessionUser) {
       if (sessionUser.email?.toLowerCase() !== invitation.email.toLowerCase()) {
         return res.redirect('/?error=invite_email_mismatch');
+      }
+      // Don't move/demote a user who already belongs to a different workspace —
+      // that would orphan their existing workspace + data.
+      if (sessionUser.workspaceId && sessionUser.workspaceId !== invitation.workspaceId) {
+        return res.redirect('/?error=invite_existing_member');
       }
       const updated = await storage.upsertUser({
         id: sessionUser.id,
@@ -2055,7 +2079,7 @@ your recipients' jurisdictions.</p>`
       to?: string[];
       created_at?: string;
       tags?: Record<string, string> | Array<{ name: string; value: string }>;
-      bounce?: { type?: string };
+      bounce?: { type?: string; subType?: string };
     };
   }) {
     const data = event.data ?? {};
@@ -2077,9 +2101,11 @@ your recipients' jurisdictions.</p>`
       case 'email.bounced': {
         if (row) await storage.updateOutreachEmailStatus(row.id, 'bounced', ts);
         if (row?.leadId) await storage.markLeadEmailStatus(row.leadId, 'bounced');
-        // Permanent bounce → suppress; transient/undetermined gets one free pass.
-        const bounceType = (data.bounce?.type ?? '').toLowerCase();
-        if (bounceType === 'permanent') {
+        // Permanent/hard bounce → suppress; transient/undetermined gets one
+        // free pass. Resend classifies via bounce.type (e.g. "Permanent") and
+        // sometimes bounce.subType — match "permanent" or "hard" in either.
+        const bounceClass = `${data.bounce?.type ?? ''} ${data.bounce?.subType ?? ''}`.toLowerCase();
+        if (bounceClass.includes('permanent') || bounceClass.includes('hard')) {
           await storage.addSuppressionEntry({ workspaceId, email, domain: null, reason: 'bounced' });
         }
         break;

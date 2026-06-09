@@ -156,7 +156,13 @@ export class EmailService {
 
     const unsubscribeUrl = makeUnsubscribeUrl(to);
     const fromAddress =
-      options.fromAddress ?? (await storage.getAppConfig('email_from_address', options.workspaceId)) ?? '';
+      options.fromAddress ??
+      (await storage.getAppConfig('email_from_address', options.workspaceId)) ??
+      // Backward-compat: workspaces that saved a from-address before the
+      // sendgrid_from_email -> email_from_address rename. Keeps the CAN-SPAM
+      // footer's physical address intact until they re-save in Settings.
+      (await storage.getAppConfig('sendgrid_from_email', options.workspaceId)) ??
+      '';
     const displayAddress = fromAddress || 'ClearEdge Outreach';
     const footerText = this.buildFooter(unsubscribeUrl, displayAddress);
     const footerHtml = this.buildFooterHtml(unsubscribeUrl, displayAddress);
@@ -389,8 +395,15 @@ export class EmailService {
         data: r.value,
         valid: r.status === 'verified',
       }));
-      const status: DomainAuthStatus['status'] =
-        detail.data.status === 'verified' ? 'verified' : detail.data.status === 'failed' ? 'error' : 'pending';
+      // Resend statuses: not_started | pending | verified | failed |
+      // temporary_failure (+ partially_verified / partially_failed). Treat any
+      // "failed" variant as an error so a broken record isn't masked as pending.
+      const rawStatus = detail.data.status ?? '';
+      const status: DomainAuthStatus['status'] = rawStatus === 'verified'
+        ? 'verified'
+        : rawStatus.includes('failed')
+          ? 'error'
+          : 'pending';
       return {
         status,
         domain: match.name,

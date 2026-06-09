@@ -395,8 +395,8 @@ function DomainStatusCard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {status.records.map((r) => (
-                      <tr key={r.label} className="border-b last:border-0 align-top">
+                    {status.records.map((r, i) => (
+                      <tr key={`${r.label}-${r.host}-${i}`} className="border-b last:border-0 align-top">
                         <td className="py-1 pr-3 font-medium">{r.label}</td>
                         <td className="py-1 pr-3 uppercase">{r.type}</td>
                         <td className="py-1 pr-3 font-mono break-all">{r.host}</td>
