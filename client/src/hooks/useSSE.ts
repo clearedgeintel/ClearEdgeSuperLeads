@@ -46,8 +46,9 @@ export function useSSE(): void {
             }
           }
 
-          // Toast on reply_received so the operator notices even if they're
-          // on a different tab.
+          // Toast on attention-worthy events so the operator notices even if
+          // they're on a different tab. (limit_warning also refreshes the
+          // Dashboard banner via the query invalidation above.)
           if (eventType === 'reply_received') {
             try {
               const data = JSON.parse((e as MessageEvent).data);
@@ -57,6 +58,27 @@ export function useSSE(): void {
               });
             } catch {
               toast({ title: 'New reply received' });
+            }
+          } else if (eventType === 'campaign_completed') {
+            try {
+              const data = JSON.parse((e as MessageEvent).data);
+              toast({
+                title: 'Campaign enrollment completed',
+                description: `${data?.campaignName ?? 'A campaign'} finished a lead${data?.reason === 'max_touches' ? ' (max touches reached)' : ''}.`,
+              });
+            } catch {
+              toast({ title: 'Campaign enrollment completed' });
+            }
+          } else if (eventType === 'limit_warning') {
+            try {
+              const data = JSON.parse((e as MessageEvent).data);
+              toast({
+                title: 'Approaching send limit',
+                description: `${data?.channel ?? data?.action ?? 'A channel'} at ${data?.percent ?? 80}% of the ${data?.scope === 'plan' ? 'monthly plan' : 'daily'} cap.`,
+                variant: 'destructive',
+              });
+            } catch {
+              toast({ title: 'Approaching send limit', variant: 'destructive' });
             }
           }
         });

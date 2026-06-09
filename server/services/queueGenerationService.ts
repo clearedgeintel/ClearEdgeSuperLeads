@@ -11,6 +11,7 @@ import { storage } from '../storage';
 import { aiService } from './aiService';
 import { buildEnhancedPrompt, selectPromptVersion } from './promptEngine';
 import { trackApiCall } from '../lib/apiTracker';
+import { emit } from '../lib/eventEmitter';
 import type { Campaign, Lead, CampaignStep, CampaignEnrollment, SendQueueItem } from '@shared/schema';
 
 export interface GenerateSingleResult {
@@ -102,6 +103,16 @@ export class QueueGenerationService {
         const totalSent = await storage.countSuccessfulSends(campaign.id, lead.id);
         if (totalSent >= (campaign.maxTouches ?? 5)) {
           await storage.updateEnrollment(enrollment.id, { status: 'completed' });
+          emit(campaign.workspaceId, {
+            type: 'campaign_completed',
+            data: {
+              campaignId: campaign.id,
+              campaignName: campaign.name,
+              enrollmentId: enrollment.id,
+              leadId: lead.id,
+              reason: 'max_touches',
+            },
+          });
           out.skipped++;
           continue;
         }
@@ -123,6 +134,16 @@ export class QueueGenerationService {
         );
         if (!step) {
           await storage.updateEnrollment(enrollment.id, { status: 'completed' });
+          emit(campaign.workspaceId, {
+            type: 'campaign_completed',
+            data: {
+              campaignId: campaign.id,
+              campaignName: campaign.name,
+              enrollmentId: enrollment.id,
+              leadId: lead.id,
+              reason: 'steps_exhausted',
+            },
+          });
           out.skipped++;
           continue;
         }
