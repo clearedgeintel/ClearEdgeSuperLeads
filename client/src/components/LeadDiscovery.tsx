@@ -15,9 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Users, AlertTriangle, Clock, Eye, Mail, Star, RefreshCw, Upload, Filter, ArrowDown, ArrowUp, X } from "lucide-react";
+import { Search, Users, AlertTriangle, Clock, Eye, Mail, Star, RefreshCw, Upload, Filter, ArrowDown, ArrowUp, X, FileUp, Copy } from "lucide-react";
 import LeadModal from "./LeadModal";
 import OutreachPreviewModal from "./OutreachPreviewModal";
+import LeadImportModal from "./LeadImportModal";
 
 type SortKey = 'aiScore' | 'rating' | 'totalReviews' | 'businessName' | 'discoveredAt';
 type SortOrder = 'asc' | 'desc';
@@ -30,6 +31,7 @@ export default function LeadDiscovery() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [outreachLead, setOutreachLead] = useState<any>(null);
   const [isOutreachOpen, setIsOutreachOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   // Filter & sort state
   const [searchText, setSearchText] = useState('');
@@ -142,6 +144,28 @@ export default function LeadDiscovery() {
     },
     onError: (err: Error) => {
       toast({ title: 'Bulk verify failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  // Current user — used to gate the admin-only "Find duplicates" action.
+  const { data: authUser } = useQuery<{ role?: string }>({ queryKey: ['/api/auth/user'] });
+  const isAdmin = authUser?.role === 'admin';
+
+  const dedupeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/leads/deduplicate');
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      const d = data?.data ?? { scanned: 0, merged: 0 };
+      toast({
+        title: 'Deduplication complete',
+        description: `Scanned ${d.scanned} lead(s), merged ${d.merged} duplicate(s).`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Deduplication failed', description: err.message, variant: 'destructive' });
     },
   });
 
@@ -343,6 +367,31 @@ export default function LeadDiscovery() {
               <RefreshCw className={`h-4 w-4 ${bulkVerifyMutation.isPending ? 'animate-spin' : ''}`} />
               <span>Verify emails</span>
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsImportOpen(true)}
+              className="flex items-center space-x-2"
+              title="Import leads from a CSV file"
+            >
+              <FileUp className="h-4 w-4" />
+              <span>Import CSV</span>
+            </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (confirm('Scan this workspace for duplicate leads (by email, LinkedIn URL, or business+website) and merge them? The oldest record in each group is kept. This cannot be undone.')) {
+                    dedupeMutation.mutate();
+                  }
+                }}
+                disabled={dedupeMutation.isPending}
+                className="flex items-center space-x-2"
+                title="Find and merge duplicate leads across the workspace (admin only)"
+              >
+                <Copy className={`h-4 w-4 ${dedupeMutation.isPending ? 'animate-pulse' : ''}`} />
+                <span>Find duplicates</span>
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -726,6 +775,12 @@ export default function LeadDiscovery() {
         open={isOutreachOpen}
         onClose={() => setIsOutreachOpen(false)}
         onSent={() => queryClient.invalidateQueries({ queryKey: ['/api/leads'] })}
+      />
+
+      <LeadImportModal
+        open={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImported={() => queryClient.invalidateQueries({ queryKey: ['/api/leads'] })}
       />
     </div>
   );
