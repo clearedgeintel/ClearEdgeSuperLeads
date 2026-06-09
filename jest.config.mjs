@@ -1,6 +1,10 @@
-import type { Config } from 'jest';
+// Plain ESM config (the project is "type": "module"). Kept as .mjs rather than
+// .ts so Jest doesn't need ts-node just to PARSE its own config — ts-jest still
+// transforms the .ts test files via the preset below. (A .ts config requires
+// ts-node, which isn't a dependency and broke `npm ci` CI runs.)
 
-const config: Config = {
+/** @type {import('jest').Config} */
+export default {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
   testMatch: ['**/__tests__/**/*.test.ts'],
@@ -14,5 +18,3 @@ const config: Config = {
     '^nanoid$': '<rootDir>/__tests__/__mocks__/nanoid.ts',
   },
 };
-
-export default config;

@@ -1,16 +1,21 @@
-// Email service. Phase 8 replaced the Gmail-only transport from Phase 1.1
-// with SendGrid as the primary provider and kept Gmail SMTP as a dev
-// fallback (when SENDGRID_API_KEY isn't set). Every send still passes
+// Email service. Resend is the primary transport with Gmail SMTP kept as a
+// dev fallback (when RESEND_API_KEY isn't set). Every send still passes
 // through the Phase 7 suppression check, CAN-SPAM footer, and
 // List-Unsubscribe headers — those behaviors are transport-agnostic.
 //
-// Why SendGrid: Gmail SMTP breaks at real send volume, lacks bounce
-// webhooks, has no dedicated sending reputation, and costs you domain
-// reputation if a campaign goes sideways. SendGrid gives us bounce +
-// open + click webhooks, category tagging for per-campaign analytics,
-// and a separate IP pool we can warm up deliberately.
+// Why Resend: Gmail SMTP breaks at real send volume, lacks bounce webhooks,
+// has no dedicated sending reputation, and costs you domain reputation if a
+// campaign goes sideways. Resend (built on AWS SES) gives us bounce + spam +
+// open + click webhooks, tags for per-campaign analytics, and a simple
+// domains API for SPF/DKIM verification status.
+//
+// Tracking note: Resend toggles open/click tracking at the DOMAIN level, not
+// per-send. To keep transactional mail (invites) untracked, point
+// RESEND_TRANSACTIONAL_FROM_EMAIL at a separate subdomain whose Resend domain
+// has tracking disabled. If unset, transactional mail falls back to the main
+// from-address. Our own open-pixel (GET /track/open/:emailId) is independent.
 
-import sgMail from '@sendgrid/mail';
+import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 import { storage } from '../storage';
 import { makeUnsubscribeUrl } from '../lib/unsubscribe';
@@ -21,9 +26,9 @@ export interface SendOutreachOptions {
   workspaceId?: string | null;
   /** Physical mailing address for CAN-SPAM footer. */
   fromAddress?: string;
-  /** Optional outreach_emails row id — used as SendGrid category + custom_arg */
+  /** Optional outreach_emails row id — sent as a Resend tag so webhooks can credit the event. */
   emailId?: string;
-  /** Optional campaign id — surfaced via SendGrid categories for webhooks. */
+  /** Optional campaign id — sent as a Resend tag for per-campaign webhook routing. */
   campaignId?: string;
 }
 
@@ -51,25 +56,26 @@ export class EmailDailyLimitError extends Error {
   }
 }
 
-type Provider = 'sendgrid' | 'gmail';
+type Provider = 'resend' | 'gmail';
 
 export class EmailService {
   private provider: Provider;
+  private resend: Resend | null = null;
   private gmailTransporter: nodemailer.Transporter | null = null;
 
   constructor() {
-    const sendgridKey = process.env.SENDGRID_API_KEY;
+    const resendKey = process.env.RESEND_API_KEY;
     const gmailUser = process.env.GMAIL_USER || process.env.EMAIL_USER;
     const gmailPass = process.env.GMAIL_PASSWORD || process.env.EMAIL_PASSWORD;
 
-    if (sendgridKey) {
-      sgMail.setApiKey(sendgridKey);
-      this.provider = 'sendgrid';
-      logger.info('[email] provider: sendgrid');
+    if (resendKey) {
+      this.resend = new Resend(resendKey);
+      this.provider = 'resend';
+      logger.info('[email] provider: resend');
     } else if (gmailUser && gmailPass) {
       this.provider = 'gmail';
       logger.warn(
-        '[email] SENDGRID_API_KEY not set, falling back to Gmail SMTP (dev only)'
+        '[email] RESEND_API_KEY not set, falling back to Gmail SMTP (dev only)'
       );
       this.gmailTransporter = nodemailer.createTransport({
         service: 'gmail',
@@ -82,9 +88,15 @@ export class EmailService {
       // (which bypasses try/catch because it fires from a TLS socket).
       this.provider = 'gmail';
       logger.warn(
-        '[email] no email credentials configured (set SENDGRID_API_KEY or GMAIL_USER + GMAIL_PASSWORD). sendOutreachEmail will throw until configured.'
+        '[email] no email credentials configured (set RESEND_API_KEY or GMAIL_USER + GMAIL_PASSWORD). sendOutreachEmail will throw until configured.'
       );
     }
+  }
+
+  /** Build a Resend "Name <email>" from string. */
+  private formatFrom(email: string): string {
+    const name = process.env.RESEND_FROM_NAME;
+    return name ? `${name} <${email}>` : email;
   }
 
   /**
@@ -144,7 +156,13 @@ export class EmailService {
 
     const unsubscribeUrl = makeUnsubscribeUrl(to);
     const fromAddress =
-      options.fromAddress ?? (await storage.getAppConfig('sendgrid_from_email', options.workspaceId)) ?? '';
+      options.fromAddress ??
+      (await storage.getAppConfig('email_from_address', options.workspaceId)) ??
+      // Backward-compat: workspaces that saved a from-address before the
+      // sendgrid_from_email -> email_from_address rename. Keeps the CAN-SPAM
+      // footer's physical address intact until they re-save in Settings.
+      (await storage.getAppConfig('sendgrid_from_email', options.workspaceId)) ??
+      '';
     const displayAddress = fromAddress || 'ClearEdge Outreach';
     const footerText = this.buildFooter(unsubscribeUrl, displayAddress);
     const footerHtml = this.buildFooterHtml(unsubscribeUrl, displayAddress);
@@ -153,62 +171,43 @@ export class EmailService {
     const html = `${this.formatEmailContent(content)}${footerHtml}${this.trackingPixel(options.emailId)}`;
     const text = `${content}\n\n${footerText}`;
 
-    if (this.provider === 'sendgrid') {
-      const fromEmail = process.env.SENDGRID_FROM_EMAIL;
+    if (this.provider === 'resend' && this.resend) {
+      const fromEmail = process.env.RESEND_FROM_EMAIL;
       if (!fromEmail) {
-        throw new Error('SENDGRID_FROM_EMAIL env var not set');
+        throw new Error('RESEND_FROM_EMAIL env var not set');
       }
-      try {
-        const [response] = await sgMail.send({
-          to,
-          from: {
-            email: fromEmail,
-            name: process.env.SENDGRID_FROM_NAME || displayAddress,
-          },
-          subject,
-          html,
-          text,
-          headers: {
-            'List-Unsubscribe': listUnsub,
-            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-          },
-          // Categories tag the send in SendGrid analytics + let our
-          // webhook route the event back to the right outreach_email row
-          // via sg_event_id / unique_args.
-          categories: [
-            'clearedge-outreach',
-            options.campaignId ? `campaign:${options.campaignId}` : 'campaign:none',
-          ],
-          customArgs: {
-            emailId: options.emailId ?? '',
-            campaignId: options.campaignId ?? '',
-            workspaceId: options.workspaceId ?? '',
-          },
-          // SendGrid tracking — one-click click wrapping stays ON,
-          // SendGrid's native open pixel stays ON. Our own pixel in
-          // the HTML body is a redundant fallback for recipients whose
-          // mail clients strip third-party pixels.
-          trackingSettings: {
-            clickTracking: { enable: true, enableText: false },
-            openTracking: { enable: true },
-            subscriptionTracking: { enable: false },
-          },
-        });
-        const messageId =
-          (response.headers as Record<string, string>)?.['x-message-id'] ??
-          String(response.statusCode);
-        await recordPlanSend(options.workspaceId, 'email');
-        return { messageId, success: true, provider: 'sendgrid' };
-      } catch (error: any) {
-        logger.error({ err: error }, '[email] sendgrid send failed');
-        throw new Error(`Failed to send email via SendGrid: ${error.message}`);
+      // Tags route the webhook event back to the right outreach_email row.
+      // Resend tag names/values must be ASCII alphanumerics, '_' or '-'.
+      const tags = [
+        { name: 'source', value: 'clearedge_outreach' },
+        { name: 'email_id', value: options.emailId || 'none' },
+        { name: 'campaign_id', value: options.campaignId || 'none' },
+        { name: 'workspace_id', value: options.workspaceId || 'none' },
+      ];
+      const { data, error } = await this.resend.emails.send({
+        from: this.formatFrom(fromEmail),
+        to,
+        subject,
+        html,
+        text,
+        headers: {
+          'List-Unsubscribe': listUnsub,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
+        tags,
+      });
+      if (error) {
+        logger.error({ err: error }, '[email] resend send failed');
+        throw new Error(`Failed to send email via Resend: ${error.message}`);
       }
+      await recordPlanSend(options.workspaceId, 'email');
+      return { messageId: data?.id ?? '', success: true, provider: 'resend' };
     }
 
     // Gmail fallback (dev only)
     if (!this.gmailTransporter) {
       throw new Error(
-        'Email provider not configured. Set SENDGRID_API_KEY or GMAIL_USER + GMAIL_PASSWORD.'
+        'Email provider not configured. Set RESEND_API_KEY or GMAIL_USER + GMAIL_PASSWORD.'
       );
     }
     try {
@@ -231,6 +230,65 @@ export class EmailService {
     }
   }
 
+  /**
+   * Send a transactional email (invites, system notices). Deliberately skips
+   * EVERYTHING sendOutreachEmail does: no suppression check (an invitee could
+   * be on the outreach suppression list and must still get their invite), no
+   * CAN-SPAM unsubscribe footer/headers (this isn't marketing mail), no plan
+   * or daily-limit metering (invites don't consume send quota), and no open/
+   * click tracking. Same provider dispatch (Resend primary, Gmail fallback).
+   */
+  async sendTransactionalEmail(
+    to: string,
+    subject: string,
+    html: string,
+    text?: string,
+  ): Promise<{ messageId: string; success: boolean; provider: Provider }> {
+    const textBody = text ?? html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    if (this.provider === 'resend' && this.resend) {
+      // Prefer a dedicated transactional from-address (point it at a subdomain
+      // whose Resend domain has open/click tracking disabled). Falls back to
+      // the main outreach from-address when not configured.
+      const fromEmail = process.env.RESEND_TRANSACTIONAL_FROM_EMAIL || process.env.RESEND_FROM_EMAIL;
+      if (!fromEmail) {
+        throw new Error('RESEND_FROM_EMAIL (or RESEND_TRANSACTIONAL_FROM_EMAIL) env var not set');
+      }
+      const { data, error } = await this.resend.emails.send({
+        from: this.formatFrom(fromEmail),
+        to,
+        subject,
+        html,
+        text: textBody,
+        tags: [{ name: 'source', value: 'clearedge_transactional' }],
+      });
+      if (error) {
+        logger.error({ err: error }, '[email] resend transactional send failed');
+        throw new Error(`Failed to send transactional email via Resend: ${error.message}`);
+      }
+      return { messageId: data?.id ?? '', success: true, provider: 'resend' };
+    }
+
+    if (!this.gmailTransporter) {
+      throw new Error(
+        'Email provider not configured. Set RESEND_API_KEY or GMAIL_USER + GMAIL_PASSWORD.',
+      );
+    }
+    try {
+      const info = await this.gmailTransporter.sendMail({
+        from: process.env.GMAIL_USER || process.env.EMAIL_USER,
+        to,
+        subject,
+        html,
+        text: textBody,
+      });
+      return { messageId: info.messageId, success: true, provider: 'gmail' };
+    } catch (error: any) {
+      logger.error({ err: error }, '[email] gmail transactional send failed');
+      throw new Error(`Failed to send transactional email via Gmail: ${error.message}`);
+    }
+  }
+
   private buildFooter(unsubscribeUrl: string, fromAddress: string): string {
     return `\n---\n${fromAddress}\nIf you'd prefer not to receive these messages, unsubscribe here: ${unsubscribeUrl}`;
   }
@@ -240,7 +298,7 @@ export class EmailService {
   }
 
   // Our own 1x1 tracking pixel — defense in depth against recipients
-  // whose mail clients strip third-party (SendGrid) tracking pixels.
+  // whose mail clients strip the provider's native tracking pixel.
   // Hits GET /track/open/:emailId which updates opened_at.
   private trackingPixel(emailId?: string): string {
     if (!emailId) return '';
@@ -262,9 +320,9 @@ export class EmailService {
   }
 
   async verifyConnection(): Promise<boolean> {
-    if (this.provider === 'sendgrid') {
-      // SendGrid doesn't expose a ping endpoint; we trust the API key.
-      return Boolean(process.env.SENDGRID_API_KEY);
+    if (this.provider === 'resend') {
+      // Resend has no cheap ping endpoint; trust the API key's presence.
+      return Boolean(process.env.RESEND_API_KEY);
     }
     if (!this.gmailTransporter) return false;
     try {
@@ -279,6 +337,103 @@ export class EmailService {
   getProvider(): Provider {
     return this.provider;
   }
+
+  /**
+   * Live Resend sending-domain authentication status, for the Settings UI.
+   * Lists Resend domains, matches the one the from-address belongs to, and
+   * fetches its DNS records. Returns:
+   *   - not_configured: no Resend key / from-email (or Gmail fallback mode)
+   *   - verified: Resend reports the domain verified
+   *   - pending: domain exists but records aren't all validated yet
+   *   - error: domain not found in Resend, or the API call failed
+   * Resend domain auth covers SPF + DKIM. DMARC is pure operator DNS and isn't
+   * reported here — see DEPLOYMENT.md.
+   */
+  async getDomainAuthStatus(): Promise<DomainAuthStatus> {
+    const fromEmail = process.env.RESEND_FROM_EMAIL;
+    if (this.provider !== 'resend' || !this.resend) {
+      return { status: 'not_configured', message: 'Resend is not configured (using Gmail dev fallback).' };
+    }
+    if (!fromEmail || !fromEmail.includes('@')) {
+      return { status: 'not_configured', message: 'RESEND_FROM_EMAIL is not set, so no sending domain to verify.' };
+    }
+    const fromDomain = fromEmail.split('@')[1].toLowerCase();
+
+    try {
+      const list = await this.resend.domains.list();
+      if (list.error) {
+        return { status: 'error', domain: fromDomain, message: `Resend API error: ${list.error.message}` };
+      }
+      const domains = list.data?.data ?? [];
+      const match = domains.find(
+        (d) => fromDomain === d.name.toLowerCase() || fromDomain.endsWith(`.${d.name.toLowerCase()}`),
+      );
+      if (!match) {
+        return {
+          status: 'error',
+          domain: fromDomain,
+          message: `No domain in Resend matches "${fromDomain}". Add and verify it under Domains in the Resend dashboard.`,
+          records: [],
+        };
+      }
+
+      const detail = await this.resend.domains.get(match.id);
+      if (detail.error || !detail.data) {
+        // Fall back to the list-level status if the detail call fails.
+        const verified = match.status === 'verified';
+        return {
+          status: verified ? 'verified' : 'pending',
+          domain: match.name,
+          message: verified ? 'Sending domain is verified.' : `Domain status: ${match.status}.`,
+        };
+      }
+
+      const records: DomainAuthRecord[] = (detail.data.records ?? []).map((r) => ({
+        label: r.record,
+        type: r.type,
+        host: r.name,
+        data: r.value,
+        valid: r.status === 'verified',
+      }));
+      // Resend statuses: not_started | pending | verified | failed |
+      // temporary_failure (+ partially_verified / partially_failed). Treat any
+      // "failed" variant as an error so a broken record isn't masked as pending.
+      const rawStatus = detail.data.status ?? '';
+      const status: DomainAuthStatus['status'] = rawStatus === 'verified'
+        ? 'verified'
+        : rawStatus.includes('failed')
+          ? 'error'
+          : 'pending';
+      return {
+        status,
+        domain: match.name,
+        message:
+          status === 'verified'
+            ? 'Sending domain is verified (SPF + DKIM valid).'
+            : status === 'error'
+              ? 'Resend reports domain verification failed. Re-check the DNS records below.'
+              : 'Domain found but DNS records are not all validated yet. Publish the records below; propagation can take up to 48h.',
+        records,
+      };
+    } catch (err) {
+      logger.error({ err }, '[email] domain auth status check failed');
+      return { status: 'error', domain: fromDomain, message: 'Could not reach Resend to check domain status.' };
+    }
+  }
+}
+
+export interface DomainAuthRecord {
+  label: string;
+  type: string;
+  host: string;
+  data: string;
+  valid: boolean;
+}
+export interface DomainAuthStatus {
+  status: 'verified' | 'pending' | 'not_configured' | 'error';
+  domain?: string;
+  message: string;
+  records?: DomainAuthRecord[];
 }
 
 export const emailService = new EmailService();

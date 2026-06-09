@@ -154,33 +154,39 @@ Respond with JSON in this exact format:
     ownerName?: string;
   }): Promise<{ subject: string; content: string }> {
     try {
-      const prompt = `Generate a professional outreach email for a Google Business Profile consulting service.
+      const noticed = leadData.issues.length
+        ? leadData.issues.map(issue => `- ${issue.category}: ${issue.description}`).join('\n')
+        : '(none provided — open with a warm, specific-sounding observation about this type of business instead)';
+
+      const prompt = `Write a short, personal cold outreach email from ClearEdge to a local business owner.
 
 Business: ${leadData.businessName}
 Category: ${leadData.category || 'Business'}
-Owner: ${leadData.ownerName || 'Business Owner'}
+Owner: ${leadData.ownerName || 'there'}
 
-Key issues identified:
-${leadData.issues.map(issue => `- ${issue.category}: ${issue.description}`).join('\n')}
+Things we noticed about their Google Business Profile (use ONE of these, naturally, as a soft opener — do NOT list them all or sound like an audit report):
+${noticed}
 
-Create a personalized, professional email that:
-1. Introduces our GBP consulting services
-2. Mentions specific issues we identified (without being too technical)
-3. Highlights potential benefits of optimization
-4. Includes a clear call-to-action
-5. Maintains a consultative, helpful tone (not salesy)
-6. Keeps it concise (under 200 words)
+About ClearEdge: we help local businesses (1) sharpen their Google Business Profile so it actually drives calls, and (2) use AI to take the repetitive, low-value busywork off the owner's plate — the operational stuff that eats hours but doesn't grow the business. Use broad, relatable examples like inventory, bookkeeping, time-keeping, scheduling, invoicing, follow-ups, review requests, and data entry (pick the 1–2 most relevant to their business type — don't list them all). We bring the power of AI to small and mid-sized businesses.
+
+The email MUST:
+1. Open with a genuine, specific observation about THEIR business or GBP (use one noticed item) so the first line earns the read.
+2. Pivot to one curious, human question — the core hook: what is the task they spend the most time on that brings the least value? Frame it as something AI could probably take off their hands.
+3. In a single sentence, say ClearEdge helps local businesses do exactly that: a stronger Google presence plus AI that automates the time-wasters.
+4. Close with a LOW-FRICTION call to action: invite a one-line reply (e.g. "what's the one thing you'd love to never do again?"). Do NOT ask for a call, demo, or meeting.
+5. Sound like a real person wrote it — warm, conversational, concise (UNDER 130 words). No buzzwords, no "I hope this email finds you well," no bullet points in the body, no hard sell.
 
 Respond with JSON in this format:
 {
   "subject": string,
   "content": string
-}`;
+}
+The subject should be short and curious, not salesy — e.g. "quick question about ${leadData.businessName}".`;
 
       const response = await withRetry(() => anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1024,
-        system: "You are a professional business consultant specializing in Google Business Profile optimization. Write compelling but professional outreach emails. Always respond with valid JSON only, no other text.",
+        system: "You are an outreach specialist for ClearEdge, a company that helps small and local businesses improve their Google Business Profile AND brings the power of AI to automate the time-consuming, low-value tasks that eat an owner's day. You write short, consultative, genuinely human emails that open a conversation — never salesy, never templated. Always respond with valid JSON only, no other text.",
         messages: [
           { role: "user", content: prompt }
         ],
@@ -190,8 +196,8 @@ Respond with JSON in this format:
       const result = extractJson(text);
 
       return {
-        subject: result.subject || `Improve ${leadData.businessName}'s Google Business Profile`,
-        content: result.content || 'Professional consultation available for your Google Business Profile optimization.'
+        subject: result.subject || `Quick question about ${leadData.businessName}`,
+        content: result.content || `Hi ${leadData.ownerName || 'there'} — I came across ${leadData.businessName} and had a quick question: what's the task you spend the most time on that brings you the least value? At ClearEdge we help local businesses sharpen their Google presence and use AI to take that kind of busywork off your plate. Curious — what's the one thing you'd love to never do again?`
       };
     } catch (error: any) {
       console.error('AI email generation error:', error);

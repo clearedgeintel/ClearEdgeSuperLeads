@@ -36,8 +36,8 @@ const FIELD_LABELS: Record<string, { label: string; placeholder: string; type?: 
     label: "Calendly / scheduling link",
     placeholder: "https://calendly.com/your-handle/intro",
   },
-  sendgrid_from_email: {
-    label: "SendGrid from address",
+  email_from_address: {
+    label: "From address (Resend verified domain)",
     placeholder: "outreach@yourdomain.com",
   },
   slack_webhook_url: {
@@ -148,7 +148,7 @@ export default function Settings() {
             "unipile_account_id",
             "unipile_base_url",
             "calendly_link",
-            "sendgrid_from_email",
+            "email_from_address",
             "slack_webhook_url",
           ].map((key) => (
             <SettingField
@@ -209,6 +209,9 @@ export default function Settings() {
       {/* Audit log (Phase 12) */}
       <AuditLog />
 
+      {/* Sending-domain authentication status (Resend SPF/DKIM) */}
+      <DomainStatusCard />
+
       {/* Phase 8 — Email warm-up guidance */}
       <Card>
         <CardHeader>
@@ -230,7 +233,7 @@ export default function Settings() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-gray-500 mt-0.5">•</span>
-              <span><strong>Week 3:</strong> 100/day. Monitor SendGrid reputation dashboard.</span>
+              <span><strong>Week 3:</strong> 100/day. Monitor the Resend dashboard for deliverability + bounce rate.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-gray-500 mt-0.5">•</span>
@@ -322,5 +325,100 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-gray-500">{label}</div>
       <div className="text-xl font-bold text-gray-900 mt-1">{value}</div>
     </div>
+  );
+}
+
+interface DomainAuthRecord {
+  label: string;
+  type: string;
+  host: string;
+  data: string;
+  valid: boolean;
+}
+interface DomainAuthStatus {
+  status: "verified" | "pending" | "not_configured" | "error";
+  domain?: string;
+  message: string;
+  records?: DomainAuthRecord[];
+}
+
+const DOMAIN_STATUS_STYLE: Record<DomainAuthStatus["status"], { label: string; cls: string }> = {
+  verified: { label: "Verified", cls: "bg-green-100 text-green-800" },
+  pending: { label: "Pending DNS", cls: "bg-yellow-100 text-yellow-800" },
+  not_configured: { label: "Not configured", cls: "bg-gray-100 text-gray-700" },
+  error: { label: "Error", cls: "bg-red-100 text-red-800" },
+};
+
+function DomainStatusCard() {
+  const { data, isLoading } = useQuery<{ success: boolean; data: DomainAuthStatus }>({
+    queryKey: ["/api/email/domain-status"],
+  });
+  const status = data?.data;
+  const style = status ? DOMAIN_STATUS_STYLE[status.status] : DOMAIN_STATUS_STYLE.not_configured;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Sending Domain Authentication
+          {status && (
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${style.cls}`}>
+              {style.label}
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-gray-500">Checking Resend…</p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-600">
+              {status?.message}
+              {status?.domain && (
+                <>
+                  {" "}
+                  (<code>{status.domain}</code>)
+                </>
+              )}
+            </p>
+            {status?.records && status.records.length > 0 && (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b">
+                      <th className="py-1 pr-3">Record</th>
+                      <th className="py-1 pr-3">Type</th>
+                      <th className="py-1 pr-3">Host</th>
+                      <th className="py-1 pr-3">Points to</th>
+                      <th className="py-1">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {status.records.map((r, i) => (
+                      <tr key={`${r.label}-${r.host}-${i}`} className="border-b last:border-0 align-top">
+                        <td className="py-1 pr-3 font-medium">{r.label}</td>
+                        <td className="py-1 pr-3 uppercase">{r.type}</td>
+                        <td className="py-1 pr-3 font-mono break-all">{r.host}</td>
+                        <td className="py-1 pr-3 font-mono break-all">{r.data}</td>
+                        <td className="py-1">
+                          <span className={r.valid ? "text-green-700" : "text-yellow-700"}>
+                            {r.valid ? "✓ valid" : "pending"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mt-3">
+              Resend domain auth covers SPF + DKIM. Add a DMARC TXT record separately — see
+              <code className="mx-1">DEPLOYMENT.md</code>. DNS changes can take up to 48h to propagate.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

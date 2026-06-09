@@ -21,7 +21,7 @@ const STEPS: OnboardingStep[] = [
     id: 1,
     title: "Connect email",
     description:
-      "Set your SendGrid API key and from-address in Settings so outbound emails use a verified sending domain instead of Gmail SMTP.",
+      "Set your Resend API key (RESEND_API_KEY) in the server env and your from-address in Settings so outbound emails use a verified sending domain instead of Gmail SMTP.",
     icon: <Mail className="h-5 w-5 text-blue-600" />,
     action: "settings",
     actionLabel: "Go to Settings",
@@ -74,9 +74,12 @@ export default function Onboarding({
   const config = settingsData?.data?.values ?? {};
 
   // Derive completed steps from actual config state so the checklist
-  // reflects reality rather than manual "done" clicks.
+  // reflects reality rather than manual "done" clicks. Note: we can't
+  // check process.env from the browser — if an operator has only the
+  // server-side RESEND_API_KEY set without filling in the from-address
+  // field, step 1 stays open until they visit Settings once.
   const completedSteps = new Set<number>();
-  if (config.sendgrid_from_email || process.env.SENDGRID_API_KEY) completedSteps.add(1);
+  if (config.email_from_address) completedSteps.add(1);
   if (config.unipile_account_id && config.unipile_account_id !== "YOUR_LINKEDIN_ACCOUNT_ID")
     completedSteps.add(2);
   // Steps 3 and 4 would need campaign/lead count queries — for now they're

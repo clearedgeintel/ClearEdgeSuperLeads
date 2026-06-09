@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startScheduler } from "./jobs/scheduler";
@@ -16,7 +17,33 @@ process.on('uncaughtException', (err) => {
 });
 
 const app = express();
-app.use(express.json());
+
+// Security headers. CSP is disabled because the SPA (and Vite dev HMR) rely on
+// inline scripts/styles that a default policy would block; the other protections
+// (HSTS, X-Content-Type-Options, frameguard, referrer policy, etc.) all apply.
+// crossOriginEmbedderPolicy is off so the client can load third-party assets
+// (Stripe, tracking pixels) without COEP failures.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+// Note: CORS is mounted in registerRoutes() (server/routes.ts) — don't add a
+// second cors() here or origins get double Access-Control-Allow-Origin headers.
+
+// Signature-verified webhooks (Stripe, Resend) need the raw, unparsed body and
+// mount their own express.raw() parser in registerRoutes(). Skip the global
+// JSON parser for those exact paths — otherwise it consumes the stream first,
+// req.body becomes a parsed object, and HMAC/signature verification fails on a
+// re-stringified body. (Calendly/Cal.com webhooks use parsed JSON, so only the
+// signature-verified raw paths are excluded here.)
+const RAW_BODY_PATHS = new Set(['/api/webhooks/stripe', '/api/webhooks/resend']);
+const jsonParser = express.json();
+app.use((req, res, next) => {
+  if (RAW_BODY_PATHS.has(req.path)) return next();
+  jsonParser(req, res, next);
+});
 app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {

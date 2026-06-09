@@ -531,6 +531,30 @@ export const unipileAccounts = pgTable('unipile_accounts', {
 });
 
 // ============================================================
+// invitations — workspace member invites (signed email link → accept on login)
+// ============================================================
+export const invitations = pgTable(
+  'invitations',
+  {
+    id: varchar('id').primaryKey().notNull(),
+    workspaceId: varchar('workspace_id')
+      .references(() => workspaces.id)
+      .notNull(),
+    email: varchar('email').notNull(),
+    role: varchar('role').notNull().default('member'), // admin | member
+    invitedBy: varchar('invited_by').references(() => users.id),
+    status: varchar('status').notNull().default('pending'), // pending | accepted | revoked
+    expiresAt: timestamp('expires_at').notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => [
+    index('idx_invitations_email').on(table.email),
+    index('idx_invitations_workspace').on(table.workspaceId),
+  ]
+);
+
+// ============================================================
 // app_config — key/value workspace config (ported from ClearEdge Leads)
 // ============================================================
 export const appConfig = pgTable(
@@ -652,6 +676,8 @@ export type InsertAuditLogEntry = z.infer<typeof insertAuditLogSchema>;
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type UnipileAccount = typeof unipileAccounts.$inferSelect;
+export type Invitation = typeof invitations.$inferSelect;
+export type InsertInvitation = typeof invitations.$inferInsert;
 export type AppConfigEntry = typeof appConfig.$inferSelect;
 
 export type KnowledgeEntry = typeof knowledgeBase.$inferSelect;
