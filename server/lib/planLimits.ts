@@ -6,6 +6,7 @@
 
 import { storage } from '../storage';
 import { getPlanLimits } from '@shared/plans';
+import { emit } from './eventEmitter';
 
 export class PlanLimitExceededError extends Error {
   channel: 'email' | 'linkedin';
@@ -47,6 +48,25 @@ export async function assertPlanLimit(
       : workspace.monthlyLinkedinSendsUsed ?? 0;
   const limit =
     channel === 'email' ? limits.emailSendsPerMonth : limits.linkedinSendsPerMonth;
+
+  // Soft warning at 80% of the monthly cap. assertPlanLimit runs once per send
+  // (pre-increment), and recordPlanSend bumps the counter by 1, so `used` lands
+  // exactly on the threshold for a single send — emit once per cycle, not on
+  // every send in the 80-99% band.
+  const warnAt = Math.floor(limit * 0.8);
+  if (limit > 0 && warnAt > 0 && used === warnAt) {
+    emit(workspaceId, {
+      type: 'limit_warning',
+      data: {
+        scope: 'plan',
+        channel,
+        used,
+        limit,
+        percent: Math.round((used / limit) * 100),
+        plan: workspace.plan ?? 'free',
+      },
+    });
+  }
 
   if (used >= limit) {
     throw new PlanLimitExceededError(channel, workspace.plan ?? 'free', used, limit);

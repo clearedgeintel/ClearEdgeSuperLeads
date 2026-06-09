@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Mail, Download, AlertTriangle, Clock, Info, Star, RefreshCw, Globe, MapPin, Upload, Trash2 } from "lucide-react";
+import { Mail, Download, AlertTriangle, Clock, Info, Star, RefreshCw, Globe, MapPin, Upload, Trash2, Sparkles, Ban } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -61,6 +61,45 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
     },
     onError: (err: Error) => {
       toast({ title: 'Verify failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  const enrichFullMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest('POST', `/api/leads/${id}/enrich-full`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      const source = data?.data?.source ?? 'none';
+      if (source === 'none') {
+        toast({
+          title: 'No enrichment data found',
+          description: 'Apollo/Hunter found nothing, or no API key is configured on the server.',
+        });
+      } else {
+        toast({ title: `Enriched via ${source}`, description: 'Lead detail updated.' });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Enrichment failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  const suppressMutation = useMutation({
+    mutationFn: async (email: string) => {
+      const res = await apiRequest('POST', '/api/suppression', { email, reason: 'manual' });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/suppression'] });
+      toast({
+        title: 'Added to suppression list',
+        description: `${lead.email} will be excluded from all outreach in this workspace.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Suppression failed', description: err.message, variant: 'destructive' });
     },
   });
 
@@ -364,6 +403,30 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
               >
                 <RefreshCw className={`h-4 w-4 ${verifyEmailMutation.isPending ? 'animate-spin' : ''}`} />
                 <span>Verify email</span>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              className="flex items-center justify-center space-x-2 text-orange-600 border-orange-200 hover:bg-orange-50"
+              onClick={() => enrichFullMutation.mutate(lead.id)}
+              disabled={enrichFullMutation.isPending}
+            >
+              <Sparkles className={`h-4 w-4 ${enrichFullMutation.isPending ? 'animate-pulse' : ''}`} />
+              <span>Enrich with Apollo</span>
+            </Button>
+            {lead.email && (
+              <Button
+                variant="outline"
+                className="flex items-center justify-center space-x-2 text-amber-700 border-amber-200 hover:bg-amber-50"
+                onClick={() => {
+                  if (confirm(`Add ${lead.email} to the suppression list? They will be permanently excluded from all outreach in this workspace.`)) {
+                    suppressMutation.mutate(lead.email);
+                  }
+                }}
+                disabled={suppressMutation.isPending}
+              >
+                <Ban className="h-4 w-4" />
+                <span>Suppress</span>
               </Button>
             )}
             <Button
