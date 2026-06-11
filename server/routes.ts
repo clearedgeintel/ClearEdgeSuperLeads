@@ -30,6 +30,7 @@ import { validateBody } from "./middleware/validate";
 import { requireWorkspace } from "./middleware/requireWorkspace";
 import { requireRole } from "./middleware/requireRole";
 import { makeInviteUrl, verifyInviteToken } from "./lib/inviteToken";
+import { timingSafeEqualB64 } from "./lib/signedToken";
 import {
   linkedinSearchSchema,
   linkedinSaveProfilesSchema,
@@ -48,6 +49,34 @@ import { aiQueue } from "./lib/backgroundQueue";
 import * as nodeCrypto from "node:crypto";
 import { verifyUnsubscribeToken } from "./lib/unsubscribe";
 import { sendTestWebhook, deliverWebhookEvent } from "./services/webhookDeliveryService";
+
+/**
+ * Apply an accepted invitation: upsert the user into the invited workspace +
+ * role, mark the invitation accepted, and write the audit entry. Shared by the
+ * Google OAuth callback (new login via an invite link) and the /accept-invite
+ * landing (already-logged-in user). The CALLER owns the pre-checks
+ * (pending / unexpired / email-match / not-already-in-another-workspace).
+ */
+async function acceptInvitation(
+  invitation: { id: string; workspaceId: string; role: string },
+  baseUserData: Parameters<typeof storage.upsertUser>[0],
+): Promise<Awaited<ReturnType<typeof storage.upsertUser>>> {
+  const user = await storage.upsertUser({
+    ...baseUserData,
+    workspaceId: invitation.workspaceId,
+    role: invitation.role,
+  });
+  await storage.markInvitationAccepted(invitation.id);
+  await storage.createAuditEntry({
+    workspaceId: invitation.workspaceId,
+    userId: user.id,
+    action: 'invite_accepted',
+    entityType: 'invitation',
+    entityId: invitation.id,
+    metadata: { email: user.email, role: invitation.role },
+  });
+  return user;
+}
 
 // Serialize an array of objects into an RFC-4180 CSV string. Values are
 // always wrapped in double quotes (embedded quotes doubled) so column
@@ -271,9 +300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Only honor it when the invite is still pending, unexpired, and was
       // issued to the same email the user just authenticated with — otherwise
       // anyone with a link could join as a different address.
-      let inviteWorkspaceId: string | undefined;
-      let inviteRole: string | undefined;
-      let acceptedInviteId: string | undefined;
+      let acceptedInvite: Awaited<ReturnType<typeof storage.getInvitation>> | undefined;
       let inviteBlockedExistingMember = false;
       const pendingInviteId = req.session.pendingInviteId;
       if (pendingInviteId) {
@@ -290,19 +317,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (existing?.workspaceId && existing.workspaceId !== invite!.workspaceId) {
             inviteBlockedExistingMember = true;
           } else {
-            inviteWorkspaceId = invite!.workspaceId;
-            inviteRole = invite!.role;
-            acceptedInviteId = invite!.id;
+            acceptedInvite = invite;
           }
         }
         delete req.session.pendingInviteId;
       }
 
-      // Store user in database. When accepting an invite we pass the invited
-      // workspace + role up front, so upsertUser's auto-personal-workspace
-      // branch is skipped (no orphaned workspace) and an existing user is
-      // moved into the inviting workspace.
-      const user = await storage.upsertUser({
+      // Store user in database. When accepting an invite, acceptInvitation passes
+      // the invited workspace + role up front, so upsertUser's auto-personal-
+      // workspace branch is skipped (no orphaned workspace).
+      const baseUserData = {
         id: userInfo.id!,
         email: userInfo.email!,
         firstName: userInfo.given_name || null,
@@ -311,20 +335,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         googleAccessToken: tokens.access_token!,
         googleRefreshToken: tokens.refresh_token || null,
         tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-        ...(inviteWorkspaceId ? { workspaceId: inviteWorkspaceId, role: inviteRole } : {}),
-      });
-
-      if (acceptedInviteId && inviteWorkspaceId) {
-        await storage.markInvitationAccepted(acceptedInviteId);
-        await storage.createAuditEntry({
-          workspaceId: inviteWorkspaceId,
-          userId: user.id,
-          action: 'invite_accepted',
-          entityType: 'invitation',
-          entityId: acceptedInviteId,
-          metadata: { email: user.email, role: inviteRole },
-        });
-      }
+      };
+      const user = acceptedInvite
+        ? await acceptInvitation(acceptedInvite, baseUserData)
+        : await storage.upsertUser(baseUserData);
 
       console.log('User stored in database:', user.id);
 
@@ -333,7 +347,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('User stored in session, redirecting to home...');
 
       res.redirect(
-        acceptedInviteId
+        acceptedInvite
           ? '/?success=invite_accepted'
           : inviteBlockedExistingMember
             ? '/?error=invite_existing_member'
@@ -1570,20 +1584,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (sessionUser.workspaceId && sessionUser.workspaceId !== invitation.workspaceId) {
         return res.redirect('/?error=invite_existing_member');
       }
-      const updated = await storage.upsertUser({
+      const updated = await acceptInvitation(invitation, {
         id: sessionUser.id,
         email: sessionUser.email,
-        workspaceId: invitation.workspaceId,
-        role: invitation.role,
-      });
-      await storage.markInvitationAccepted(invitation.id);
-      await storage.createAuditEntry({
-        workspaceId: invitation.workspaceId,
-        userId: sessionUser.id,
-        action: 'invite_accepted',
-        entityType: 'invitation',
-        entityId: invitation.id,
-        metadata: { email: invitation.email, role: invitation.role },
       });
       req.session.user = updated;
       return res.redirect('/?success=invite_accepted');
@@ -2042,12 +2045,10 @@ your recipients' jurisdictions.</p>`
           const secretBytes = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');
           const signedContent = `${svixId}.${svixTimestamp}.${rawBody.toString()}`;
           const expected = crypto.createHmac('sha256', secretBytes).update(signedContent).digest('base64');
-          const expectedBuf = Buffer.from(expected);
           // svix-signature is a space-separated list of "v1,<base64sig>".
           const passed = svixSignature.split(' ').some((part) => {
             const sig = part.includes(',') ? part.split(',')[1] : part;
-            const sigBuf = Buffer.from(sig);
-            return sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf);
+            return timingSafeEqualB64(sig, expected);
           });
           if (!passed) {
             return res.status(401).json({ success: false, error: 'Invalid signature' });
@@ -2095,7 +2096,13 @@ your recipients' jurisdictions.</p>`
       : (data.tags ?? {});
     const workspaceId = tags.workspace_id && tags.workspace_id !== 'none' ? tags.workspace_id : null;
 
-    const row = await storage.getLatestOutreachEmailByRecipient(email);
+    // Prefer the exact send via the email_id tag we attached at send time;
+    // fall back to latest-by-recipient (which misattributes for a lead that
+    // received multiple campaigns) only when the tag is missing.
+    const taggedEmailId = tags.email_id && tags.email_id !== 'none' ? tags.email_id : null;
+    const row =
+      (taggedEmailId ? await storage.getOutreachEmail(taggedEmailId) : undefined) ??
+      (await storage.getLatestOutreachEmailByRecipient(email));
 
     switch (event.type) {
       case 'email.bounced': {

@@ -1334,6 +1334,14 @@ export class DatabaseStorage implements IStorage {
       .where(eq(outreachEmails.id, id));
   }
 
+  // Fetch a single outreach_emails row by id — used by the Resend webhook to
+  // credit an event to the exact send via the email_id tag (preferred over the
+  // latest-by-recipient fallback, which misattributes for multi-campaign leads).
+  async getOutreachEmail(id: string): Promise<OutreachEmail | undefined> {
+    const [row] = await db.select().from(outreachEmails).where(eq(outreachEmails.id, id)).limit(1);
+    return row;
+  }
+
   // Find the most recent outreach_emails row for a recipient so a
   // provider webhook (Resend) can credit the event back to the right
   // send by recipient address.

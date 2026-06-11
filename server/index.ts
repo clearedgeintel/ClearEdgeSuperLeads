@@ -4,6 +4,15 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { startScheduler } from "./jobs/scheduler";
 
+// Fail loud in production if SESSION_SECRET is unset. Session cookies AND the
+// HMAC-signed unsubscribe/invite tokens fall back to a hardcoded dev secret
+// otherwise — which would make those tokens forgeable. Dev keeps the fallback.
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  throw new Error(
+    'SESSION_SECRET must be set in production — it signs sessions and unsubscribe/invite tokens.',
+  );
+}
+
 // Process-level safety net. Third-party libraries (nodemailer, pg pools,
 // fetch streams) occasionally emit async errors that bypass our route-
 // level try/catch. Log them loudly but keep the server up — crashing the

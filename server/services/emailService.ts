@@ -58,10 +58,15 @@ export class EmailDailyLimitError extends Error {
 
 type Provider = 'resend' | 'gmail';
 
+// Domain auth status reflects DNS state that changes on the order of hours; a
+// short cache collapses repeated Settings-page loads to one Resend round-trip.
+const DOMAIN_STATUS_TTL_MS = 60_000;
+
 export class EmailService {
   private provider: Provider;
   private resend: Resend | null = null;
   private gmailTransporter: nodemailer.Transporter | null = null;
+  private domainStatusCache: { key: string; at: number; value: DomainAuthStatus } | null = null;
 
   constructor() {
     const resendKey = process.env.RESEND_API_KEY;
@@ -171,63 +176,29 @@ export class EmailService {
     const html = `${this.formatEmailContent(content)}${footerHtml}${this.trackingPixel(options.emailId)}`;
     const text = `${content}\n\n${footerText}`;
 
-    if (this.provider === 'resend' && this.resend) {
-      const fromEmail = process.env.RESEND_FROM_EMAIL;
-      if (!fromEmail) {
-        throw new Error('RESEND_FROM_EMAIL env var not set');
-      }
-      // Tags route the webhook event back to the right outreach_email row.
-      // Resend tag names/values must be ASCII alphanumerics, '_' or '-'.
-      const tags = [
+    // Tags route the webhook event back to the right outreach_email row.
+    // Resend tag names/values must be ASCII alphanumerics, '_' or '-'.
+    const result = await this.dispatch({
+      to,
+      subject,
+      html,
+      text,
+      fromEmail: process.env.RESEND_FROM_EMAIL,
+      headers: {
+        'List-Unsubscribe': listUnsub,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
+      tags: [
         { name: 'source', value: 'clearedge_outreach' },
         { name: 'email_id', value: options.emailId || 'none' },
         { name: 'campaign_id', value: options.campaignId || 'none' },
         { name: 'workspace_id', value: options.workspaceId || 'none' },
-      ];
-      const { data, error } = await this.resend.emails.send({
-        from: this.formatFrom(fromEmail),
-        to,
-        subject,
-        html,
-        text,
-        headers: {
-          'List-Unsubscribe': listUnsub,
-          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-        },
-        tags,
-      });
-      if (error) {
-        logger.error({ err: error }, '[email] resend send failed');
-        throw new Error(`Failed to send email via Resend: ${error.message}`);
-      }
-      await recordPlanSend(options.workspaceId, 'email');
-      return { messageId: data?.id ?? '', success: true, provider: 'resend' };
-    }
-
-    // Gmail fallback (dev only)
-    if (!this.gmailTransporter) {
-      throw new Error(
-        'Email provider not configured. Set RESEND_API_KEY or GMAIL_USER + GMAIL_PASSWORD.'
-      );
-    }
-    try {
-      const info = await this.gmailTransporter.sendMail({
-        from: process.env.GMAIL_USER || process.env.EMAIL_USER,
-        to,
-        subject,
-        html,
-        text,
-        headers: {
-          'List-Unsubscribe': listUnsub,
-          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-        },
-      });
-      await recordPlanSend(options.workspaceId, 'email');
-      return { messageId: info.messageId, success: true, provider: 'gmail' };
-    } catch (error: any) {
-      logger.error({ err: error }, '[email] gmail send failed');
-      throw new Error(`Failed to send email via Gmail: ${error.message}`);
-    }
+      ],
+    });
+    // Only count the send against the plan quota once it actually went out
+    // (dispatch throws on failure, so this never runs for a failed send).
+    await recordPlanSend(options.workspaceId, 'email');
+    return result;
   }
 
   /**
@@ -245,30 +216,56 @@ export class EmailService {
     text?: string,
   ): Promise<{ messageId: string; success: boolean; provider: Provider }> {
     const textBody = text ?? html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    // Prefer a dedicated transactional from-address (point it at a subdomain
+    // whose Resend domain has open/click tracking disabled). Falls back to the
+    // main outreach from-address when not configured. No headers/metering/
+    // tracking — that's the whole point of the transactional path.
+    return this.dispatch({
+      to,
+      subject,
+      html,
+      text: textBody,
+      fromEmail: process.env.RESEND_TRANSACTIONAL_FROM_EMAIL || process.env.RESEND_FROM_EMAIL,
+      tags: [{ name: 'source', value: 'clearedge_transactional' }],
+    });
+  }
 
+  /**
+   * Provider transport — Resend primary, Gmail dev fallback. The single place
+   * that talks to a provider; the public send methods own all policy
+   * (suppression, footer, plan metering, tracking) and hand dispatch the final
+   * payload. Throws on provider error so callers never record a failed send.
+   */
+  private async dispatch(opts: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    fromEmail?: string;
+    headers?: Record<string, string>;
+    tags?: { name: string; value: string }[];
+  }): Promise<{ messageId: string; success: boolean; provider: Provider }> {
     if (this.provider === 'resend' && this.resend) {
-      // Prefer a dedicated transactional from-address (point it at a subdomain
-      // whose Resend domain has open/click tracking disabled). Falls back to
-      // the main outreach from-address when not configured.
-      const fromEmail = process.env.RESEND_TRANSACTIONAL_FROM_EMAIL || process.env.RESEND_FROM_EMAIL;
-      if (!fromEmail) {
-        throw new Error('RESEND_FROM_EMAIL (or RESEND_TRANSACTIONAL_FROM_EMAIL) env var not set');
+      if (!opts.fromEmail) {
+        throw new Error('RESEND_FROM_EMAIL env var not set');
       }
       const { data, error } = await this.resend.emails.send({
-        from: this.formatFrom(fromEmail),
-        to,
-        subject,
-        html,
-        text: textBody,
-        tags: [{ name: 'source', value: 'clearedge_transactional' }],
+        from: this.formatFrom(opts.fromEmail),
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text,
+        ...(opts.headers ? { headers: opts.headers } : {}),
+        ...(opts.tags ? { tags: opts.tags } : {}),
       });
       if (error) {
-        logger.error({ err: error }, '[email] resend transactional send failed');
-        throw new Error(`Failed to send transactional email via Resend: ${error.message}`);
+        logger.error({ err: error }, '[email] resend send failed');
+        throw new Error(`Failed to send email via Resend: ${error.message}`);
       }
       return { messageId: data?.id ?? '', success: true, provider: 'resend' };
     }
 
+    // Gmail fallback (dev only)
     if (!this.gmailTransporter) {
       throw new Error(
         'Email provider not configured. Set RESEND_API_KEY or GMAIL_USER + GMAIL_PASSWORD.',
@@ -277,15 +274,16 @@ export class EmailService {
     try {
       const info = await this.gmailTransporter.sendMail({
         from: process.env.GMAIL_USER || process.env.EMAIL_USER,
-        to,
-        subject,
-        html,
-        text: textBody,
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text,
+        ...(opts.headers ? { headers: opts.headers } : {}),
       });
       return { messageId: info.messageId, success: true, provider: 'gmail' };
     } catch (error: any) {
-      logger.error({ err: error }, '[email] gmail transactional send failed');
-      throw new Error(`Failed to send transactional email via Gmail: ${error.message}`);
+      logger.error({ err: error }, '[email] gmail send failed');
+      throw new Error(`Failed to send email via Gmail: ${error.message}`);
     }
   }
 
@@ -348,8 +346,22 @@ export class EmailService {
    *   - error: domain not found in Resend, or the API call failed
    * Resend domain auth covers SPF + DKIM. DMARC is pure operator DNS and isn't
    * reported here — see DEPLOYMENT.md.
+   *
+   * Result is cached briefly (keyed by provider + from-address) so repeated
+   * Settings views don't each fire two Resend API round-trips.
    */
   async getDomainAuthStatus(): Promise<DomainAuthStatus> {
+    const key = `${this.provider}:${process.env.RESEND_FROM_EMAIL ?? ''}`;
+    const cached = this.domainStatusCache;
+    if (cached && cached.key === key && Date.now() - cached.at < DOMAIN_STATUS_TTL_MS) {
+      return cached.value;
+    }
+    const value = await this.computeDomainAuthStatus();
+    this.domainStatusCache = { key, at: Date.now(), value };
+    return value;
+  }
+
+  private async computeDomainAuthStatus(): Promise<DomainAuthStatus> {
     const fromEmail = process.env.RESEND_FROM_EMAIL;
     if (this.provider !== 'resend' || !this.resend) {
       return { status: 'not_configured', message: 'Resend is not configured (using Gmail dev fallback).' };
