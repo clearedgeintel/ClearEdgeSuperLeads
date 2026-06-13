@@ -390,7 +390,7 @@ function StepsEditor({
             />
           </div>
           <Textarea
-            placeholder="Prompt template — use {{full_name}}, {{title}}, {{company}}, {{industry}}, {{headline}}, {{tone}}"
+            placeholder="Prompt template — use {{full_name}}, {{title}}, {{company}}, {{industry}}, {{headline}}, {{tone}}, {{demo_url}}"
             value={promptTemplate}
             onChange={(e) => setPromptTemplate(e.target.value)}
             rows={4}
@@ -699,7 +699,7 @@ function PromptVersionsPanel({
             value={promptTemplate}
             onChange={(e) => setPromptTemplate(e.target.value)}
             rows={5}
-            placeholder="Variant prompt template — same {{full_name}} / {{title}} / {{company}} / {{industry}} / {{headline}} / {{tone}} variables as the step template"
+            placeholder="Variant prompt template — same {{full_name}} / {{title}} / {{company}} / {{industry}} / {{headline}} / {{tone}} / {{demo_url}} variables as the step template"
           />
           <div className="flex items-center gap-2 justify-end">
             <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>

@@ -17,6 +17,7 @@ import { addClient, emit } from "./lib/eventEmitter";
 import { placesApiService } from "./services/placesApi";
 import { emailDiscoveryService } from "./services/emailDiscovery";
 import { hubspotService, extractDomain, parseAddress } from "./services/hubspotService";
+import { instantSiteService } from "./services/instantSiteService";
 import { linkedInSearchService, LinkedInSearchLimitError } from "./services/linkedinSearchService";
 import { dailyUsed, dailyCap, type LinkedInAction } from "./lib/linkedinLimiter";
 import { queueGenerationService } from "./services/queueGenerationService";
@@ -489,6 +490,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, hubspotCompanyId: result.id, lead: updatedLead });
     } catch (error: any) {
       console.error('HubSpot push error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Generate a hosted Instant Site demo for a lead ("look what I built for you").
+  app.post('/api/leads/:id/generate-demo', requireAuth, async (req, res) => {
+    try {
+      if (!instantSiteService.isConfigured()) {
+        return res.status(400).json({ message: "Instant Site is not configured. Set INSTANT_SITE_BASE_URL." });
+      }
+      const lead = await storage.getLead(req.params.id);
+      if (!lead) {
+        return res.status(404).json({ message: "Lead not found" });
+      }
+      const { slug, url } = await instantSiteService.generateForLead(lead.id);
+      res.json({ success: true, slug, url });
+    } catch (error: any) {
+      console.error('Generate demo site error:', error);
       res.status(500).json({ message: error.message });
     }
   });

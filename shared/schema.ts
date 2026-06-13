@@ -120,6 +120,10 @@ export const leads = pgTable(
     linkedinScore: integer('linkedin_score').default(0),
     language: varchar('language').default('en'),
 
+    // Instant Site demo (v2) — generated one-page demo site for this lead.
+    demoSiteSlug: varchar('demo_site_slug'),
+    demoSiteUrl: varchar('demo_site_url'),
+
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
