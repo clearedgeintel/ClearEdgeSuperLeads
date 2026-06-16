@@ -103,6 +103,24 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
     },
   });
 
+  const generateDemoMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest('POST', `/api/leads/${id}/generate-demo`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      toast({
+        title: 'Demo site generated',
+        description: 'A hosted demo site is ready for this lead.',
+      });
+      if (data?.url) window.open(data.url, '_blank', 'noopener');
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Demo generation failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
   if (!lead) return null;
 
   const getSeverityIcon = (severity: string) => {
@@ -393,6 +411,32 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
             >
               <Download className="h-4 w-4" />
               <span>Export</span>
+            </Button>
+            {lead.demoSiteUrl && (
+              <a
+                href={lead.demoSiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center space-x-2 px-4 py-2 text-sky-700 border border-sky-200 rounded-md text-sm hover:bg-sky-50"
+              >
+                <Globe className="h-4 w-4" />
+                <span>View demo site</span>
+              </a>
+            )}
+            <Button
+              variant="outline"
+              className="flex items-center justify-center space-x-2 text-sky-600 border-sky-200 hover:bg-sky-50"
+              onClick={() => generateDemoMutation.mutate(lead.id)}
+              disabled={generateDemoMutation.isPending}
+            >
+              <Globe className={`h-4 w-4 ${generateDemoMutation.isPending ? 'animate-pulse' : ''}`} />
+              <span>
+                {generateDemoMutation.isPending
+                  ? 'Generating…'
+                  : lead.demoSiteUrl
+                    ? 'Regenerate demo'
+                    : 'Generate demo site'}
+              </span>
             </Button>
             {lead.email && !lead.emailVerified && (
               <Button

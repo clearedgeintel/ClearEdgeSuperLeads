@@ -65,7 +65,8 @@ export function interpolatePrompt(
     .replace(/\{\{headline\}\}/g, sanitizeField(lead.headline))
     .replace(/\{\{tone\}\}/g, sanitizeField(tone))
     .replace(/\{\{company_size\}\}/g, sanitizeField(lead.companySize))
-    .replace(/\{\{enrichment\}\}/g, sanitizeField(formatEnrichment(lead.enrichmentData)));
+    .replace(/\{\{enrichment\}\}/g, sanitizeField(formatEnrichment(lead.enrichmentData)))
+    .replace(/\{\{demo_url\}\}/g, sanitizeField(lead.demoSiteUrl));
 }
 
 function formatEnrichment(data: unknown): string {

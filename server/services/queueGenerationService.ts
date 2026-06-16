@@ -10,6 +10,7 @@
 import { storage } from '../storage';
 import { aiService } from './aiService';
 import { buildEnhancedPrompt, selectPromptVersion } from './promptEngine';
+import { instantSiteService } from './instantSiteService';
 import { trackApiCall } from '../lib/apiTracker';
 import { emit } from '../lib/eventEmitter';
 import type { Campaign, Lead, CampaignStep, CampaignEnrollment, SendQueueItem } from '@shared/schema';
@@ -199,9 +200,17 @@ export class QueueGenerationService {
       step.promptTemplate
     );
 
+    // If the template references {{demo_url}} and this lead has no demo site
+    // yet, generate one on the fly so the link resolves. Never throws.
+    let leadForPrompt = lead;
+    if (template?.includes('{{demo_url}}') && !lead.demoSiteUrl) {
+      const demoUrl = await instantSiteService.ensureDemoForLead(lead);
+      if (demoUrl) leadForPrompt = { ...lead, demoSiteUrl: demoUrl };
+    }
+
     const prompt = await buildEnhancedPrompt({
       template,
-      lead,
+      lead: leadForPrompt,
       tone,
       workspaceId: campaign.workspaceId,
     });
