@@ -6,7 +6,7 @@
 
 import { storage } from '../storage';
 
-export type ApiProvider = 'claude' | 'unipile' | 'places' | 'hubspot';
+export type ApiProvider = 'claude' | 'unipile' | 'places' | 'hubspot' | 'apollo';
 
 export interface ApiCall {
   provider: ApiProvider;
