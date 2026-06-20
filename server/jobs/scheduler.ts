@@ -23,6 +23,28 @@ import { db } from '../db';
 
 type JobFn = () => Promise<void>;
 
+// A lead is flipped to 'analyzing' at the start of its in-memory aiQueue
+// job (routes.ts queueBackgroundTasks). If the process restarts — Railway
+// redeploy, crash — mid-job, that job is lost and the lead is stranded in
+// 'analyzing' forever, since nothing else reconciles it. Real analysis
+// finishes in seconds, so anything older than this threshold is stuck.
+const STALE_ANALYZING_MS = 15 * 60 * 1000;
+
+/**
+ * Reset leads stranded in 'analyzing' back to 'discovered' (the same
+ * retryable state queueBackgroundTasks uses when AI analysis throws).
+ * Returns the number of leads recovered.
+ */
+async function recoverStuckAnalyzing(): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_ANALYZING_MS);
+  const rows = await db
+    .update(leads)
+    .set({ status: 'discovered', updatedAt: new Date() })
+    .where(and(eq(leads.status, 'analyzing'), lte(leads.updatedAt, cutoff)))
+    .returning({ id: leads.id });
+  return rows.length;
+}
+
 async function runJob(name: string, fn: JobFn): Promise<void> {
   const started = Date.now();
   try {
@@ -49,6 +71,20 @@ export function startScheduler(): void {
     logger.info('scheduler disabled via DISABLE_SCHEDULER=1');
     return;
   }
+
+  // Recover leads stranded in 'analyzing' by a mid-job restart. Run once
+  // immediately (so a redeploy unsticks them right away) and every 10 min
+  // as a safety net.
+  void runJob('recoverStuckAnalyzing', async () => {
+    const recovered = await recoverStuckAnalyzing();
+    if (recovered > 0) logger.info({ recovered }, 'recovered stuck analyzing leads');
+  });
+  cron.schedule('*/10 * * * *', () => {
+    void runJob('recoverStuckAnalyzing', async () => {
+      const recovered = await recoverStuckAnalyzing();
+      if (recovered > 0) logger.info({ recovered }, 'recovered stuck analyzing leads');
+    });
+  });
 
   // Queue generation — build AI drafts for active enrollments every 15 min
   cron.schedule('*/15 * * * *', () => {
@@ -166,6 +202,6 @@ export function startScheduler(): void {
 
   started = true;
   logger.info(
-    'scheduler started (queueGen 15m, dispatch 5m, inbox 10m, usageReset 1st, reEnrich 3am, digest 8am)'
+    'scheduler started (recoverStuck 10m, queueGen 15m, dispatch 5m, inbox 10m, usageReset 1st, reEnrich 3am, digest 8am)'
   );
 }
