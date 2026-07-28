@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -15,14 +16,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Users, AlertTriangle, Clock, Eye, Mail, Star, RefreshCw, Upload, Filter, ArrowDown, ArrowUp, X, FileUp, Copy } from "lucide-react";
+import { Search, Users, AlertTriangle, Clock, Eye, Mail, Star, RefreshCw, Upload, Filter, ArrowDown, ArrowUp, X, FileUp, Copy, Sparkles } from "lucide-react";
+import { prescoreLead } from "@shared/leadPrescore";
 import LeadModal from "./LeadModal";
 import OutreachPreviewModal from "./OutreachPreviewModal";
 import LeadImportModal from "./LeadImportModal";
 
-type SortKey = 'aiScore' | 'rating' | 'totalReviews' | 'businessName' | 'discoveredAt';
+type SortKey = 'prescore' | 'aiScore' | 'rating' | 'totalReviews' | 'businessName' | 'discoveredAt';
 type SortOrder = 'asc' | 'desc';
 type YesNoAll = 'all' | 'yes' | 'no';
+
+// Server caps a single analyze request at 50 leads.
+const MAX_ANALYZE_BATCH = 50;
 
 export default function LeadDiscovery() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,8 +45,12 @@ export default function LeadDiscovery() {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [emailFilter, setEmailFilter] = useState<YesNoAll>('all');
   const [hubspotFilter, setHubspotFilter] = useState<YesNoAll>('all');
-  const [sortBy, setSortBy] = useState<SortKey>('aiScore');
+  const [sortBy, setSortBy] = useState<SortKey>('prescore');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  // Leads checked for AI analysis. Analysis costs tokens per lead, so nothing
+  // runs until the user picks and submits.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -49,11 +58,13 @@ export default function LeadDiscovery() {
   const { data: leads = [], isLoading: leadsLoading } = useQuery<any[]>({
     queryKey: ['/api/leads'],
     staleTime: 0,
-    // Auto-refresh while any lead is still being analyzed
+    // Auto-refresh only while an analysis job is actually in flight. A missing
+    // aiScore is now the normal resting state (analysis is opt-in), so polling
+    // on that would never stop.
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return false;
-      const hasPending = data.some((l: any) => l.aiScore == null || l.status === 'analyzing');
+      const hasPending = data.some((l: any) => l.status === 'analyzing');
       return hasPending ? 3000 : false;
     },
   });
@@ -84,6 +95,7 @@ export default function LeadDiscovery() {
     // Sort, with nulls always at the bottom
     result.sort((a: any, b: any) => {
       const getVal = (lead: any) => {
+        if (sortBy === 'prescore') return prescoreLead(lead).score;
         const v = lead[sortBy];
         if (v == null || v === '') return null;
         if (sortBy === 'rating') return parseFloat(v);
@@ -128,6 +140,76 @@ export default function LeadDiscovery() {
     setPriorityFilter('all');
     setEmailFilter('all');
     setHubspotFilter('all');
+  };
+
+  // --- Selection for AI analysis ---
+
+  // A lead mid-analysis can't be queued again; the server skips those anyway.
+  const isSelectable = (lead: any) => lead.status !== 'analyzing';
+
+  const selectableVisible = useMemo(
+    () => filteredLeads.filter(isSelectable),
+    [filteredLeads],
+  );
+
+  // Only count selections still visible under the current filters — a lead
+  // filtered out of view shouldn't be silently analyzed.
+  const visibleSelectedIds = useMemo(
+    () => selectableVisible.filter((l: any) => selectedIds.has(l.id)).map((l: any) => l.id),
+    [selectableVisible, selectedIds],
+  );
+
+  const allVisibleSelected =
+    selectableVisible.length > 0 && visibleSelectedIds.length === selectableVisible.length;
+
+  const toggleLead = (leadId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const l of selectableVisible) next.delete((l as any).id);
+      } else {
+        for (const l of selectableVisible) next.add((l as any).id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const analyzeMutation = useMutation({
+    mutationFn: async (leadIds: string[]) => {
+      const response = await apiRequest('POST', '/api/leads/analyze', { leadIds });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      clearSelection();
+      const queued = data?.queued ?? 0;
+      const skipped = data?.skipped?.length ?? 0;
+      toast({
+        title: 'Analysis Queued',
+        description:
+          `Running AI analysis on ${queued} lead${queued === 1 ? '' : 's'}.` +
+          (skipped > 0 ? ` Skipped ${skipped} already in progress.` : ''),
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Analysis Failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const handleAnalyzeSelected = () => {
+    if (visibleSelectedIds.length === 0) return;
+    analyzeMutation.mutate(visibleSelectedIds.slice(0, MAX_ANALYZE_BATCH));
   };
 
   const bulkVerifyMutation = useMutation({
@@ -231,10 +313,10 @@ export default function LeadDiscovery() {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
       toast({
-        title: data.requeued > 0 ? "Re-analysis Started" : "Nothing to Re-analyze",
+        title: data.requeued > 0 ? "Recovery Started" : "Nothing Stuck",
         description: data.requeued > 0
           ? `Re-queued ${data.requeued} stuck lead${data.requeued === 1 ? '' : 's'} for AI analysis.`
-          : "All leads already have AI scores.",
+          : "No leads are stuck in analysis.",
       });
     },
     onError: (error) => {
@@ -484,6 +566,7 @@ export default function LeadDiscovery() {
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="prescore">Lead Quality</SelectItem>
                   <SelectItem value="aiScore">AI Score</SelectItem>
                   <SelectItem value="rating">Google Rating</SelectItem>
                   <SelectItem value="totalReviews">Review Count</SelectItem>
@@ -585,18 +668,47 @@ export default function LeadDiscovery() {
                 </span>
               )}
             </div>
-            {leads.some((l: any) => l.aiScore == null) && (
+            {leads.some((l: any) => l.status === 'analyzing') && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => reanalyzeMutation.mutate()}
                 disabled={reanalyzeMutation.isPending}
+                title="Re-queue leads left in 'analyzing' by a server restart"
               >
                 <RefreshCw className={`h-4 w-4 mr-2 ${reanalyzeMutation.isPending ? 'animate-spin' : ''}`} />
-                Re-analyze stuck
+                Recover stuck
               </Button>
             )}
           </div>
+
+          {/* Selection action bar — the only path that spends AI tokens */}
+          {visibleSelectedIds.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-2.5">
+              <span className="text-sm font-medium text-blue-900">
+                {visibleSelectedIds.length} lead{visibleSelectedIds.length === 1 ? '' : 's'} selected
+              </span>
+              {visibleSelectedIds.length > MAX_ANALYZE_BATCH && (
+                <span className="text-xs text-blue-700">
+                  Only the first {MAX_ANALYZE_BATCH} will be analyzed.
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={clearSelection} className="text-blue-900">
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleAnalyzeSelected}
+                  disabled={analyzeMutation.isPending}
+                  title="Run AI analysis on the selected leads. Uses tokens."
+                >
+                  <Sparkles className={`h-4 w-4 mr-2 ${analyzeMutation.isPending ? 'animate-pulse' : ''}`} />
+                  Analyze {Math.min(visibleSelectedIds.length, MAX_ANALYZE_BATCH)} selected
+                </Button>
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {leadsLoading ? (
@@ -625,9 +737,23 @@ export default function LeadDiscovery() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="px-4 py-3 w-10">
+                      <Checkbox
+                        checked={allVisibleSelected}
+                        onCheckedChange={toggleAllVisible}
+                        disabled={selectableVisible.length === 0}
+                        aria-label="Select all visible leads"
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Business</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</th>
+                    <th
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      title="Free heuristic score from Google Places data — no AI call. Use it to pick which leads are worth analyzing."
+                    >
+                      Quality
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">AI Score</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -635,8 +761,21 @@ export default function LeadDiscovery() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredLeads.map((lead: any) => (
-                    <tr key={lead.id} className="hover:bg-gray-50">
+                  {filteredLeads.map((lead: any) => {
+                    const prescore = prescoreLead(lead);
+                    return (
+                    <tr
+                      key={lead.id}
+                      className={`hover:bg-gray-50 ${selectedIds.has(lead.id) ? 'bg-blue-50/60' : ''}`}
+                    >
+                      <td className="px-4 py-4">
+                        <Checkbox
+                          checked={selectedIds.has(lead.id)}
+                          onCheckedChange={() => toggleLead(lead.id)}
+                          disabled={!isSelectable(lead)}
+                          aria-label={`Select ${lead.businessName}`}
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
                           <div className="text-sm font-medium text-gray-900">{lead.businessName}</div>
@@ -671,6 +810,31 @@ export default function LeadDiscovery() {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                        {prescore.disqualified ? (
+                          <span
+                            className="text-xs text-gray-500 px-2 py-1 bg-gray-100 rounded"
+                            title={prescore.reasons.join('\n')}
+                          >
+                            Closed
+                          </span>
+                        ) : (
+                          <div className="flex items-center" title={prescore.reasons.join('\n')}>
+                            <Progress value={prescore.score} className="w-16 mr-2" />
+                            <span
+                              className={`text-sm font-medium ${
+                                prescore.score < 40
+                                  ? 'text-gray-500'
+                                  : prescore.score < 70
+                                    ? 'text-yellow-600'
+                                    : 'text-green-600'
+                              }`}
+                            >
+                              {prescore.score}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         {lead.aiScore !== null ? (
                           <div className="flex items-center">
                             <Progress value={lead.aiScore} className="w-16 mr-2" />
@@ -681,8 +845,10 @@ export default function LeadDiscovery() {
                               {lead.aiScore}/100
                             </span>
                           </div>
-                        ) : (
+                        ) : lead.status === 'analyzing' ? (
                           <span className="text-sm text-gray-500">Analyzing...</span>
+                        ) : (
+                          <span className="text-sm text-gray-400">Not analyzed</span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -752,7 +918,8 @@ export default function LeadDiscovery() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

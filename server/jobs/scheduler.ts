@@ -24,7 +24,7 @@ import { db } from '../db';
 type JobFn = () => Promise<void>;
 
 // A lead is flipped to 'analyzing' at the start of its in-memory aiQueue
-// job (routes.ts queueBackgroundTasks). If the process restarts — Railway
+// job (routes.ts queueAiAnalysis). If the process restarts — Railway
 // redeploy, crash — mid-job, that job is lost and the lead is stranded in
 // 'analyzing' forever, since nothing else reconciles it. Real analysis
 // finishes in seconds, so anything older than this threshold is stuck.
@@ -32,7 +32,7 @@ const STALE_ANALYZING_MS = 15 * 60 * 1000;
 
 /**
  * Reset leads stranded in 'analyzing' back to 'discovered' (the same
- * retryable state queueBackgroundTasks uses when AI analysis throws).
+ * retryable state queueAiAnalysis uses when AI analysis throws).
  * Returns the number of leads recovered.
  */
 async function recoverStuckAnalyzing(): Promise<number> {
