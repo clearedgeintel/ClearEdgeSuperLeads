@@ -95,29 +95,34 @@ function toCsv(columns: readonly string[], rows: readonly object[]): string {
   return `${header}\n${body}`;
 }
 
-// Queue background tasks for a lead. Email discovery and AI analysis
-// run with limited concurrency to avoid hammering rate limits.
-function queueBackgroundTasks(leadId: string, place: PlaceDetails) {
+// Email discovery is free (we scrape the lead's own site), so it runs
+// automatically on every discovered lead. AI analysis is NOT — it costs tokens
+// per lead, so it only runs when the user explicitly selects leads for it.
+// See queueAiAnalysis below.
+function queueEmailDiscovery(leadId: string, website?: string) {
+  if (!website) return;
+  aiQueue.enqueue(async () => {
+    try {
+      const emailResult = await emailDiscoveryService.discoverEmails(website);
+      if (emailResult.emails.length > 0) {
+        await storage.updateLead(leadId, {
+          email: emailResult.emails[0],
+          emailSource: emailResult.source,
+        });
+      }
+    } catch (error) {
+      console.error(`Email discovery failed for ${website}:`, error);
+    }
+  });
+}
+
+// Queue AI analysis for a single lead. Spends tokens — only call this from an
+// endpoint the user explicitly invoked on leads they picked.
+function queueAiAnalysis(leadId: string, place: PlaceDetails) {
   aiQueue.enqueue(async () => {
     // Mark as analyzing so UI shows progress
     await storage.updateLead(leadId, { status: 'analyzing' });
 
-    // Email discovery from website
-    if (place.website) {
-      try {
-        const emailResult = await emailDiscoveryService.discoverEmails(place.website);
-        if (emailResult.emails.length > 0) {
-          await storage.updateLead(leadId, {
-            email: emailResult.emails[0],
-            emailSource: emailResult.source,
-          });
-        }
-      } catch (error) {
-        console.error(`Email discovery failed for ${place.website}:`, error);
-      }
-    }
-
-    // AI analysis
     try {
       const analysis = await aiService.analyzeLead({
         businessName: place.name,
@@ -137,10 +142,39 @@ function queueBackgroundTasks(leadId: string, place: PlaceDetails) {
       });
     } catch (error) {
       console.error(`AI analysis failed for lead ${leadId}:`, error);
-      // Reset status so user can retry via /score endpoint
+      // Reset status so the lead becomes selectable for analysis again
       await storage.updateLead(leadId, { status: 'discovered' });
     }
   });
+}
+
+// Rebuild a PlaceDetails-shaped object from stored lead columns, so an
+// already-persisted lead can be fed to queueAiAnalysis without re-hitting the
+// Places API.
+function placeFromLead(lead: {
+  googlePlaceId: string | null;
+  businessName: string;
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  rating: string | null;
+  totalReviews: number | null;
+  businessHours: unknown;
+  placeTypes: unknown;
+  businessStatus: string | null;
+}): PlaceDetails {
+  return {
+    placeId: lead.googlePlaceId || '',
+    name: lead.businessName,
+    formattedAddress: lead.address || undefined,
+    phone: lead.phone || undefined,
+    website: lead.website || undefined,
+    rating: lead.rating ? parseFloat(lead.rating) : undefined,
+    totalReviews: lead.totalReviews || undefined,
+    businessHours: (lead.businessHours as string[]) || undefined,
+    types: (lead.placeTypes as string[]) || undefined,
+    businessStatus: lead.businessStatus || undefined,
+  };
 }
 
 // Session middleware setup
@@ -405,8 +439,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         leads.push(lead);
 
-        // Background: email discovery + AI analysis (rate-limited queue)
-        queueBackgroundTasks(lead.id, place);
+        // Free enrichment only. AI analysis is opt-in via POST /api/leads/analyze.
+        queueEmailDiscovery(lead.id, place.website);
       }
 
       res.json(leads);
@@ -416,28 +450,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Re-queue all leads with no AI score (stuck or never analyzed)
+  // Run AI analysis on an explicitly chosen set of leads. This is the only
+  // path that spends analysis tokens — discovery no longer does it in bulk.
+  const MAX_ANALYZE_BATCH = 50;
+  app.post('/api/leads/analyze', aiLimiter, requireAuth, async (req, res) => {
+    try {
+      const user = req.session.user!;
+      const { leadIds } = req.body ?? {};
+
+      if (!Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ message: 'leadIds must be a non-empty array' });
+      }
+      if (leadIds.length > MAX_ANALYZE_BATCH) {
+        return res.status(400).json({
+          message: `Cannot analyze more than ${MAX_ANALYZE_BATCH} leads at once (received ${leadIds.length}).`,
+        });
+      }
+
+      // Scope to leads this user can actually see, so a caller can't analyze
+      // (and bill against) leads outside their workspace.
+      const visible = await storage.getLeads(user.id, user.workspaceId);
+      const byId = new Map(visible.map(l => [l.id, l]));
+
+      const queued: string[] = [];
+      const skipped: Array<{ id: string; reason: string }> = [];
+
+      for (const id of leadIds) {
+        const lead = byId.get(id);
+        if (!lead) {
+          skipped.push({ id, reason: 'not_found' });
+          continue;
+        }
+        if (lead.status === 'analyzing') {
+          skipped.push({ id, reason: 'already_analyzing' });
+          continue;
+        }
+        queueAiAnalysis(lead.id, placeFromLead(lead));
+        queued.push(lead.id);
+      }
+
+      res.json({ queued: queued.length, skipped, leadIds: queued });
+    } catch (error: any) {
+      console.error('Analyze leads error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Recover leads stranded in 'analyzing' by a mid-job restart. Deliberately
+  // narrow: it does NOT re-queue every lead lacking an aiScore, since most of
+  // those were never meant to be analyzed at all.
   app.post('/api/leads/reanalyze-stuck', requireAuth, async (req, res) => {
     try {
       const user = req.session.user!;
       const allLeads = await storage.getLeads(user.id, user.workspaceId);
-      const stuck = allLeads.filter(l => l.aiScore == null);
+      const stuck = allLeads.filter(l => l.status === 'analyzing');
 
       for (const lead of stuck) {
-        // Reconstruct a PlaceDetails-shaped object from stored fields
-        const place = {
-          placeId: lead.googlePlaceId || '',
-          name: lead.businessName,
-          formattedAddress: lead.address || undefined,
-          phone: lead.phone || undefined,
-          website: lead.website || undefined,
-          rating: lead.rating ? parseFloat(lead.rating) : undefined,
-          totalReviews: lead.totalReviews || undefined,
-          businessHours: (lead.businessHours as string[]) || undefined,
-          types: (lead.placeTypes as string[]) || undefined,
-          businessStatus: lead.businessStatus || undefined,
-        };
-        queueBackgroundTasks(lead.id, place);
+        queueAiAnalysis(lead.id, placeFromLead(lead));
       }
 
       res.json({ requeued: stuck.length });

@@ -122,8 +122,11 @@ Respond with JSON in this exact format:
   "summary": string
 }`;
 
+      // Haiku 4.5: this is a bounded classification against a fixed rubric and
+      // a fixed JSON schema. Cheapest model that handles it, and analysis is
+      // now user-selected per lead, so per-call cost is the thing to keep low.
       const response = await withRetry(() => anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-haiku-4-5",
         max_tokens: 1024,
         system: "You are a Google Business Profile optimization expert. Analyze businesses and provide actionable recommendations for improving their local search presence. Always respond with valid JSON only, no other text.",
         messages: [
@@ -183,9 +186,14 @@ Respond with JSON in this format:
 }
 The subject should be short and curious, not salesy — e.g. "quick question about ${leadData.businessName}".`;
 
+      // Sonnet 5 is the successor to the retired claude-sonnet-4. Thinking is
+      // disabled explicitly: it is ON by default on Sonnet 5, and max_tokens
+      // caps thinking + response together, so leaving it on would truncate
+      // this short JSON payload.
       const response = await withRetry(() => anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-5",
         max_tokens: 1024,
+        thinking: { type: "disabled" },
         system: "You are an outreach specialist for ClearEdge, a company that helps small and local businesses improve their Google Business Profile AND brings the power of AI to automate the time-consuming, low-value tasks that eat an owner's day. You write short, consultative, genuinely human emails that open a conversation — never salesy, never templated. Always respond with valid JSON only, no other text.",
         messages: [
           { role: "user", content: prompt }
@@ -217,8 +225,11 @@ The subject should be short and curious, not salesy — e.g. "quick question abo
   }> {
     const message = await withRetry(() =>
       anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-5',
         max_tokens: 500,
+        // Off by choice — see generateOutreachEmail. 500 tokens is a tight cap
+        // and adaptive thinking would eat it before the message is written.
+        thinking: { type: 'disabled' },
         messages: [{ role: 'user', content: prompt }],
       })
     );
