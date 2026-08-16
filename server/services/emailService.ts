@@ -109,7 +109,8 @@ export class EmailService {
    * CAN-SPAM footer + List-Unsubscribe headers run regardless of which
    * provider is active. Throws EmailSuppressedError if the recipient
    * is on the suppression list and EmailUndeliverableError if the lead
-   * row has `email_verified='undeliverable'` from Hunter.io.
+   * row has `email_verified='undeliverable'` from Hunter.io — including on
+   * the first send to that address, not just on repeat sends.
    */
   async sendOutreachEmail(
     to: string,
@@ -125,17 +126,29 @@ export class EmailService {
       throw new EmailSuppressedError(to, suppressed.reason);
     }
 
-    // Undeliverable block — if a prior Hunter.io check marked the lead
-    // email as undeliverable, don't burn a send quota on a guaranteed
-    // bounce. The lookup is keyed by the recipient email, not the
-    // lead id, so the check works even when the call site doesn't
-    // thread a leadId through.
-    const latestForRecipient = await storage.getLatestOutreachEmailByRecipient(to);
-    if (latestForRecipient?.leadId) {
-      const lead = await storage.getLead(latestForRecipient.leadId);
-      if (lead?.emailVerified === 'undeliverable') {
-        throw new EmailUndeliverableError(to);
+    // Undeliverable block — if a Hunter.io check marked the lead email as
+    // undeliverable, don't burn a send quota on a guaranteed bounce.
+    //
+    // Resolve the lead directly from the recipient address when we have a
+    // workspace to scope it to. This previously went only through
+    // getLatestOutreachEmailByRecipient, which finds a lead only if that
+    // address had ALREADY been emailed once — so the very first send to a
+    // known-undeliverable address sailed through, which is precisely the
+    // send worth blocking. The history lookup is kept as a fallback for call
+    // sites that don't thread a workspaceId through.
+    let lead = options.workspaceId
+      ? await storage.getLeadByEmail(to, options.workspaceId)
+      : undefined;
+
+    if (!lead) {
+      const latestForRecipient = await storage.getLatestOutreachEmailByRecipient(to);
+      if (latestForRecipient?.leadId) {
+        lead = await storage.getLead(latestForRecipient.leadId);
       }
+    }
+
+    if (lead?.emailVerified === 'undeliverable') {
+      throw new EmailUndeliverableError(to);
     }
 
     // Phase 9 — Monthly plan limit check. Throws PlanLimitExceededError

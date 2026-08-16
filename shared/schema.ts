@@ -76,7 +76,10 @@ export const leads = pgTable(
     address: text('address'),
     phone: varchar('phone'),
     email: varchar('email'),
-    emailSource: varchar('email_source'), // 'snippet' | 'website' | 'pattern' | 'apollo' | 'hunter'
+    // 'snippet' | 'website' | 'apollo' | 'hunter' — every value denotes an
+    // address that was actually observed or returned by a provider. 'pattern'
+    // (guessed info@/contact@/hello@) was removed: see emailDiscovery.ts.
+    emailSource: varchar('email_source'),
     website: varchar('website'),
     category: varchar('category'),
     notes: text('notes'),
