@@ -1,8 +1,9 @@
 import axios from 'axios';
 
 export interface EmailDiscoveryResult {
+  /** Addresses actually found on the site. Empty when nothing was found. */
   emails: string[];
-  source: 'website' | 'pattern';
+  source: 'website';
 }
 
 const EMAIL_REGEX = /[\w.+-]+@[\w-]+\.[\w.]+/g;
@@ -14,16 +15,21 @@ const EXCLUDED_EMAILS = [
 export class EmailDiscoveryService {
   private timeout = 5000;
 
+  /**
+   * Return only addresses actually observed on the site.
+   *
+   * There is deliberately no pattern fallback. Guessing `info@<domain>` when
+   * a scrape comes up empty produced an address indistinguishable from a real
+   * one downstream — stored on the lead, shown in the UI, and sent to. Since
+   * the scrape fails for ordinary reasons (JS-rendered contact details, bot
+   * blocking, contact forms, timeouts), those guesses were mostly wrong, and
+   * mailing them drove bounces against the sending domain's reputation.
+   *
+   * An empty result is the correct answer to "we could not find an email".
+   */
   async discoverEmails(websiteUrl: string): Promise<EmailDiscoveryResult> {
-    // Try scraping the website first
     const scrapedEmails = await this.scrapeWebsite(websiteUrl);
-    if (scrapedEmails.length > 0) {
-      return { emails: scrapedEmails, source: 'website' };
-    }
-
-    // Fall back to common email patterns
-    const patternEmails = this.generatePatterns(websiteUrl);
-    return { emails: patternEmails, source: 'pattern' };
+    return { emails: scrapedEmails, source: 'website' };
   }
 
   private async scrapeWebsite(websiteUrl: string): Promise<string[]> {
@@ -111,21 +117,6 @@ export class EmailDiscoveryService {
     if (!domain.includes('.')) return false;
 
     return true;
-  }
-
-  private generatePatterns(websiteUrl: string): string[] {
-    try {
-      const url = new URL(websiteUrl);
-      const domain = url.hostname.replace(/^www\./, '');
-
-      return [
-        `info@${domain}`,
-        `contact@${domain}`,
-        `hello@${domain}`,
-      ];
-    } catch {
-      return [];
-    }
   }
 
   private resolveUrl(base: string, path: string): string {
