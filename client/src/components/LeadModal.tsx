@@ -141,10 +141,16 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
     }
   };
 
+  // Left rail styling. Buttons are full-width and left-aligned so the rail
+  // reads as a list of actions rather than a row of chips.
+  const navBtn = 'w-full justify-start gap-2 h-9 px-2 font-normal';
+  const navSection =
+    'px-2 pt-4 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400';
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-5xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-4 border-b border-gray-200">
           <DialogTitle className="flex items-center space-x-2 flex-wrap gap-y-1">
             <span>Lead Analysis - {lead.businessName}</span>
             {lead.leadSource === 'linkedin' ? (
@@ -174,7 +180,176 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6">
+        <div className="flex flex-col md:flex-row flex-1 min-h-0">
+          {/* Left action rail. Previously a single non-wrapping flex row under
+              the content, which overflowed the dialog once a lead had enough
+              applicable actions. */}
+          <aside className="w-full md:w-60 shrink-0 overflow-y-auto border-b md:border-b-0 md:border-r border-gray-200 bg-gray-50/60 p-3">
+            <p className={`${navSection} pt-1`}>Outreach</p>
+
+            {lead.email && lead.status !== 'contacted' && (
+              <Button
+                size="sm"
+                className={navBtn}
+                onClick={() => onOutreach(lead.id)}
+              >
+                <Mail className="h-4 w-4" />
+                Send outreach email
+              </Button>
+            )}
+            {!lead.email && (
+              <p className="px-2 py-1.5 text-xs leading-relaxed text-gray-500">
+                No email found.{' '}
+                {onEnrich && !lead.enrichedAt ? (
+                  <button
+                    onClick={() => onEnrich(lead.id)}
+                    className="font-medium text-orange-600 hover:underline"
+                  >
+                    Try enriching this lead.
+                  </button>
+                ) : (
+                  'Discovery did not turn up a contact.'
+                )}
+              </p>
+            )}
+            {lead.email && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`${navBtn} text-amber-700 hover:bg-amber-50 hover:text-amber-800`}
+                onClick={() => {
+                  if (confirm(`Add ${lead.email} to the suppression list? They will be permanently excluded from all outreach in this workspace.`)) {
+                    suppressMutation.mutate(lead.email);
+                  }
+                }}
+                disabled={suppressMutation.isPending}
+              >
+                <Ban className="h-4 w-4" />
+                Suppress
+              </Button>
+            )}
+
+            <p className={navSection}>Enrichment</p>
+
+            {lead.email && !lead.emailVerified && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={navBtn}
+                onClick={() => verifyEmailMutation.mutate(lead.id)}
+                disabled={verifyEmailMutation.isPending}
+              >
+                <RefreshCw className={`h-4 w-4 ${verifyEmailMutation.isPending ? 'animate-spin' : ''}`} />
+                Verify email
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`${navBtn} text-orange-600 hover:bg-orange-50 hover:text-orange-700`}
+              onClick={() => enrichFullMutation.mutate(lead.id)}
+              disabled={enrichFullMutation.isPending}
+            >
+              <Sparkles className={`h-4 w-4 ${enrichFullMutation.isPending ? 'animate-pulse' : ''}`} />
+              Enrich with Apollo
+            </Button>
+            {onEnrich && !lead.enrichedAt && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`${navBtn} text-orange-600 hover:bg-orange-50 hover:text-orange-700`}
+                onClick={() => onEnrich(lead.id)}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Enrich with Places API
+              </Button>
+            )}
+
+            <p className={navSection}>Publish</p>
+
+            {onPushToHubSpot && (
+              lead.hubspotCompanyId ? (
+                <div className="flex h-9 items-center gap-2 px-2 text-sm text-purple-700">
+                  <Upload className="h-4 w-4" />
+                  In HubSpot
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`${navBtn} text-purple-600 hover:bg-purple-50 hover:text-purple-700`}
+                  onClick={() => onPushToHubSpot(lead.id)}
+                >
+                  <Upload className="h-4 w-4" />
+                  Push to HubSpot
+                </Button>
+              )
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`${navBtn} text-sky-600 hover:bg-sky-50 hover:text-sky-700`}
+              onClick={() => generateDemoMutation.mutate(lead.id)}
+              disabled={generateDemoMutation.isPending}
+            >
+              <Globe className={`h-4 w-4 ${generateDemoMutation.isPending ? 'animate-pulse' : ''}`} />
+              {generateDemoMutation.isPending
+                ? 'Generating…'
+                : lead.demoSiteUrl
+                  ? 'Regenerate demo'
+                  : 'Generate demo site'}
+            </Button>
+            {lead.demoSiteUrl && (
+              <a
+                href={lead.demoSiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-9 items-center gap-2 rounded-md px-2 text-sm text-sky-700 hover:bg-sky-50"
+              >
+                <Globe className="h-4 w-4" />
+                View demo site
+              </a>
+            )}
+
+            <p className={navSection}>Data</p>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={navBtn}
+              onClick={() => {
+                const data = JSON.stringify(lead, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `lead-${lead.businessName.replace(/\s+/g, '-').toLowerCase()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Export JSON
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`${navBtn} text-red-600 hover:bg-red-50 hover:text-red-700`}
+              onClick={() => {
+                const confirmMessage = `Permanently delete all data for ${lead.businessName}?\n\nThis wipes the lead plus every send_log, engagement_event, send_queue, outreach_email, and enrollment row that references it. This action is irreversible and logged to audit_log under action='gdpr_delete'.`;
+                if (confirm(confirmMessage)) {
+                  gdprDeleteMutation.mutate(lead.id);
+                }
+              }}
+              disabled={gdprDeleteMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              GDPR delete
+            </Button>
+          </aside>
+
+          {/* Detail pane — scrolls independently of the rail */}
+          <div className="flex-1 min-w-0 overflow-y-auto p-6 space-y-6">
           {/* Business Info + Rating */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -291,24 +466,15 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
                 )}
               </div>
 
-              {/* Enrichment status */}
+              {/* Enrichment status. The action itself now lives in the left
+                  rail, so this is a status line only. */}
               <div className="mt-4 text-center">
                 {lead.enrichedAt ? (
                   <p className="text-xs text-gray-400">
                     Enriched on {new Date(lead.enrichedAt).toLocaleDateString()}
                   </p>
                 ) : (
-                  onEnrich && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onEnrich(lead.id)}
-                      className="text-orange-600 border-orange-200 hover:bg-orange-50"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                      Enrich with Places API
-                    </Button>
-                  )
+                  <p className="text-xs text-gray-400">Not yet enriched</p>
                 )}
               </div>
             </div>
@@ -353,142 +519,6 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex space-x-4 pt-4 border-t border-gray-200">
-            {onPushToHubSpot && (
-              lead.hubspotCompanyId ? (
-                <div className="flex items-center justify-center space-x-2 px-4 py-2 bg-purple-50 text-purple-700 rounded-md text-sm">
-                  <Upload className="h-4 w-4" />
-                  <span>In HubSpot</span>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  onClick={() => onPushToHubSpot(lead.id)}
-                  className="flex items-center justify-center space-x-2 text-purple-600 border-purple-200 hover:bg-purple-50"
-                >
-                  <Upload className="h-4 w-4" />
-                  <span>Push to HubSpot</span>
-                </Button>
-              )
-            )}
-            {lead.email && lead.status !== 'contacted' && (
-              <Button
-                onClick={() => onOutreach(lead.id)}
-                className="flex-1 flex items-center justify-center space-x-2"
-              >
-                <Mail className="h-4 w-4" />
-                <span>Send Outreach Email</span>
-              </Button>
-            )}
-            {!lead.email && (
-              <div className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-lg text-center text-sm text-gray-500">
-                No email found — {onEnrich && !lead.enrichedAt ? (
-                  <button
-                    onClick={() => onEnrich(lead.id)}
-                    className="text-orange-600 hover:underline font-medium"
-                  >
-                    try enriching this lead
-                  </button>
-                ) : (
-                  'email discovery did not find a contact'
-                )}
-              </div>
-            )}
-            <Button
-              variant="outline"
-              className="flex items-center justify-center space-x-2"
-              onClick={() => {
-                const data = JSON.stringify(lead, null, 2);
-                const blob = new Blob([data], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `lead-${lead.businessName.replace(/\s+/g, '-').toLowerCase()}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-            >
-              <Download className="h-4 w-4" />
-              <span>Export</span>
-            </Button>
-            {lead.demoSiteUrl && (
-              <a
-                href={lead.demoSiteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center space-x-2 px-4 py-2 text-sky-700 border border-sky-200 rounded-md text-sm hover:bg-sky-50"
-              >
-                <Globe className="h-4 w-4" />
-                <span>View demo site</span>
-              </a>
-            )}
-            <Button
-              variant="outline"
-              className="flex items-center justify-center space-x-2 text-sky-600 border-sky-200 hover:bg-sky-50"
-              onClick={() => generateDemoMutation.mutate(lead.id)}
-              disabled={generateDemoMutation.isPending}
-            >
-              <Globe className={`h-4 w-4 ${generateDemoMutation.isPending ? 'animate-pulse' : ''}`} />
-              <span>
-                {generateDemoMutation.isPending
-                  ? 'Generating…'
-                  : lead.demoSiteUrl
-                    ? 'Regenerate demo'
-                    : 'Generate demo site'}
-              </span>
-            </Button>
-            {lead.email && !lead.emailVerified && (
-              <Button
-                variant="outline"
-                className="flex items-center justify-center space-x-2"
-                onClick={() => verifyEmailMutation.mutate(lead.id)}
-                disabled={verifyEmailMutation.isPending}
-              >
-                <RefreshCw className={`h-4 w-4 ${verifyEmailMutation.isPending ? 'animate-spin' : ''}`} />
-                <span>Verify email</span>
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              className="flex items-center justify-center space-x-2 text-orange-600 border-orange-200 hover:bg-orange-50"
-              onClick={() => enrichFullMutation.mutate(lead.id)}
-              disabled={enrichFullMutation.isPending}
-            >
-              <Sparkles className={`h-4 w-4 ${enrichFullMutation.isPending ? 'animate-pulse' : ''}`} />
-              <span>Enrich with Apollo</span>
-            </Button>
-            {lead.email && (
-              <Button
-                variant="outline"
-                className="flex items-center justify-center space-x-2 text-amber-700 border-amber-200 hover:bg-amber-50"
-                onClick={() => {
-                  if (confirm(`Add ${lead.email} to the suppression list? They will be permanently excluded from all outreach in this workspace.`)) {
-                    suppressMutation.mutate(lead.email);
-                  }
-                }}
-                disabled={suppressMutation.isPending}
-              >
-                <Ban className="h-4 w-4" />
-                <span>Suppress</span>
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              className="flex items-center justify-center space-x-2 text-red-600 border-red-200 hover:bg-red-50"
-              onClick={() => {
-                const confirmMessage = `Permanently delete all data for ${lead.businessName}?\n\nThis wipes the lead plus every send_log, engagement_event, send_queue, outreach_email, and enrollment row that references it. This action is irreversible and logged to audit_log under action='gdpr_delete'.`;
-                if (confirm(confirmMessage)) {
-                  gdprDeleteMutation.mutate(lead.id);
-                }
-              }}
-              disabled={gdprDeleteMutation.isPending}
-            >
-              <Trash2 className="h-4 w-4" />
-              <span>GDPR delete</span>
-            </Button>
-          </div>
-
           {lead.status === 'contacted' && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
               <div className="flex items-center space-x-2">
@@ -504,6 +534,7 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
               </div>
             </div>
           )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
