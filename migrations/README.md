@@ -12,6 +12,6 @@ Instant Site service uses this database too, so every file here must be
 - `shared/schema.ts` mirrors the result. After applying a file, a Drizzle diff
   against production should be empty.
 
-| File | Phase | What it does |
-|---|---|---|
-| `0001_sites_additive_columns.sql` | 1 | `sites`: `custom_domain` (unique, normalized), `photos`, `notify_email`, `notify_phone`, `published_at`, `client_id` |
+| File | Phase | What it does | Applied to production |
+|---|---|---|---|
+| `0001_sites_additive_columns.sql` | 1 | `sites`: `custom_domain` (unique, normalized), `photos`, `notify_email`, `notify_phone`, `published_at`, `client_id` | 2026-10-18 (Supabase `apply_migration`, name `sites_additive_columns`) |

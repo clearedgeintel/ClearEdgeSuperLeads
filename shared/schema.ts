@@ -623,12 +623,15 @@ export const sites = pgTable(
     clientId: varchar('client_id'), // FK to clients added in Phase 5
   },
   (table) => [
+    // Both expressions are written exactly as Postgres stores them (pg_get_expr):
+    // drizzle-kit compares the text literally, so any other spelling makes a
+    // push drop and recreate them. `!~~` is NOT LIKE: lowercase, no leading www.
     uniqueIndex('sites_custom_domain_key')
       .on(table.customDomain)
-      .where(sql`${table.customDomain} IS NOT NULL`),
+      .where(sql`(custom_domain IS NOT NULL)`),
     check(
       'sites_custom_domain_normalized',
-      sql`${table.customDomain} IS NULL OR (${table.customDomain} = lower(${table.customDomain}) AND ${table.customDomain} NOT LIKE 'www.%')`
+      sql`(custom_domain IS NULL) OR ((custom_domain = lower(custom_domain)) AND (custom_domain !~~ 'www.%'::text))`
     ),
     index('sites_created_at_idx').on(table.createdAt.desc().nullsFirst()),
     index('sites_deleted_at_idx').on(table.deletedAt),
