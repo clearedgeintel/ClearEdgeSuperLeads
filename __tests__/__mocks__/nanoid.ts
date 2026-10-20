@@ -8,3 +8,8 @@ export function nanoid(size?: number): string {
   const uuid = crypto.randomUUID().replace(/-/g, '');
   return size ? uuid.slice(0, size) : uuid.slice(0, 21);
 }
+
+export function customAlphabet(alphabet: string, defaultSize = 21) {
+  return (size = defaultSize): string =>
+    Array.from(crypto.randomBytes(size), (b) => alphabet[b % alphabet.length]).join('');
+}
