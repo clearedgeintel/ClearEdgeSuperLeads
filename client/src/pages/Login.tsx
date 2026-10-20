@@ -2,12 +2,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MapPin } from "lucide-react";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const { toast } = useToast();
+  const { data: authConfig } = useQuery<{ demoLoginEnabled: boolean }>({
+    queryKey: ['/api/auth/config'],
+  });
+  const demoLoginEnabled = authConfig?.demoLoginEnabled === true;
 
   const requireAcceptance = (): boolean => {
     if (!termsAccepted) {
@@ -84,26 +89,30 @@ export default function Login() {
             <span className="font-medium text-gray-700">Continue with Google</span>
           </Button>
 
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-muted-foreground">Or try demo</span>
-            </div>
-          </div>
+          {demoLoginEnabled && (
+            <>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-muted-foreground">Or try demo</span>
+                </div>
+              </div>
 
-          <Button 
-            onClick={handleDemoLogin}
-            disabled={isLoading}
-            className="w-full py-3"
-          >
-            {isLoading ? "Logging in..." : "Demo Login"}
-          </Button>
+              <Button 
+                onClick={handleDemoLogin}
+                disabled={isLoading}
+                className="w-full py-3"
+              >
+                {isLoading ? "Logging in..." : "Demo Login"}
+              </Button>
           
-          <p className="text-xs text-gray-500 text-center mt-4">
-            Demo account provides full access to test all features
-          </p>
+              <p className="text-xs text-gray-500 text-center mt-4">
+                Demo account provides full access to test all features
+              </p>
+            </>
+          )}
 
           {/* Terms acceptance + legal links */}
           <div className="mt-6 pt-4 border-t border-gray-200">

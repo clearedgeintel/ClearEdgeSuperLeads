@@ -316,8 +316,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/auth/google', (req, res) => {
     try {
       const authUrl = googleAuthService.getAuthUrl();
-      console.log('Generated Google auth URL:', authUrl);
-      console.log('Expected callback URL: http://localhost:5000/api/auth/google/callback');
       res.redirect(authUrl);
     } catch (error) {
       console.error('Google OAuth error:', error);
@@ -327,8 +325,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/auth/google/callback', async (req, res) => {
     try {
-      console.log('Google callback received:', req.query);
-      console.log('Request headers:', req.headers);
       const { code, error, state } = req.query;
       
       if (error) {
@@ -341,10 +337,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.redirect('/?error=no_code');
       }
 
-      console.log('Getting tokens from Google...');
       const tokens = await googleAuthService.getTokens(code as string);
-      console.log('Tokens received, getting user info...');
-      
+
       const userInfo = await googleAuthService.getUserInfo(tokens.access_token!);
       console.log('User info received:', { id: userInfo.id, email: userInfo.email });
 
