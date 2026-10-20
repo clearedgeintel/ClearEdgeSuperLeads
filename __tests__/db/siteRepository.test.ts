@@ -175,3 +175,57 @@ describe('generation idempotency against the real repository', () => {
     expect((await repo.getByLeadForWorkspace('lead-a', 'ws-a'))?.id).toBe(forced.site.id);
   });
 });
+
+describe('owner notification bookkeeping', () => {
+  test('pending = un-notified, inside the window, attempts left; marking and failures update it', async () => {
+    const s = await repo.create({ data: data('Notify Me'), theme: 'slate', workspaceId: 'ws-a' });
+    await repo.updateForWorkspace(s.id, 'ws-a', { notifyEmail: 'owner@example.com' });
+    const fresh = await repo.createSubmission(s, { name: 'A', email: 'a@example.com', phone: null, message: null });
+    const old = await repo.createSubmission(s, { name: 'B', email: null, phone: '555', message: null });
+    const done = await repo.createSubmission(s, { name: 'C', email: null, phone: '555', message: null });
+    await client.query(`UPDATE site_submissions SET created_at = now() - interval '10 minutes' WHERE id IN ($1, $2)`, [old.id, done.id]);
+    await repo.markSubmissionNotified(done.id);
+
+    const window = { since: new Date(Date.now() - 86_400_000), before: new Date(Date.now() - 5 * 60_000), maxAttempts: 3, limit: 50 };
+    let pending = await repo.listPendingNotifications(window);
+    const ids = pending.map((p) => p.submission.id);
+    expect(ids).toContain(old.id);
+    expect(ids).not.toContain(fresh.id); // too recent
+    expect(ids).not.toContain(done.id); // already notified
+    expect(pending.find((p) => p.submission.id === old.id)).toMatchObject({
+      attempts: 0,
+      site: { id: s.id, notifyEmail: 'owner@example.com' },
+    });
+
+    for (let i = 0; i < 3; i++) await repo.recordNotifyFailure(old.id);
+    pending = await repo.listPendingNotifications(window);
+    expect(pending.map((p) => p.submission.id)).not.toContain(old.id); // out of attempts
+
+    const { rows } = await client.query<{ notify_attempts: number; notified_at: Date | null }>(
+      `SELECT notify_attempts, notified_at FROM site_submissions WHERE id = $1`,
+      [old.id]
+    );
+    expect(rows[0]).toEqual({ notify_attempts: 3, notified_at: null });
+  });
+
+  test('in-app notifications go to every member of the site’s workspace, and only them', async () => {
+    await client.exec(
+      `INSERT INTO users (id, email, workspace_id) VALUES ('u-a1', 'a1@example.com', 'ws-a'), ('u-a2', 'a2@example.com', 'ws-a'), ('u-b1', 'b1@example.com', 'ws-b')`
+    );
+    const n = await repo.notifyWorkspaceMembers('ws-a', {
+      type: 'site_submission',
+      title: 'New quote request — Acme',
+      body: 'Jamie · 555-0100',
+      link: null,
+    });
+    expect(n).toBe(2);
+    const { rows } = await client.query<{ user_id: string; workspace_id: string }>(
+      `SELECT user_id, workspace_id FROM notifications WHERE type = 'site_submission' ORDER BY user_id`
+    );
+    expect(rows).toEqual([
+      { user_id: 'u-a1', workspace_id: 'ws-a' },
+      { user_id: 'u-a2', workspace_id: 'ws-a' },
+    ]);
+    expect(await repo.notifyWorkspaceMembers('ws-empty', { type: 't', title: 't', body: null, link: null })).toBe(0);
+  });
+});

@@ -1,6 +1,7 @@
-import type { BusinessData, Theme } from "@shared/sites";
+import type { BusinessData, SitePhoto, Theme } from "@shared/sites";
 import { SAMPLE_TESTIMONIAL_AUTHOR } from "@shared/sites";
 import { THEMES, sanitizeHex, onAccentText } from "./themes";
+import { buildLocalBusinessJsonLd, serializeJsonLd } from "../jsonLd";
 
 // renderSite(data, theme) -> one standalone HTML document (inline <style>,
 // Google Fonts link, no JS dependencies). Built fresh from spec §6. The same
@@ -39,9 +40,48 @@ export interface RenderOptions {
   submitted?: boolean;
   /** Absolute URL of the view-tracking pixel (omit on previews/sample to not count them). */
   pixelUrl?: string;
+  /**
+   * 'demo' (default): noindex, demo footer, sample-review note. These pages
+   * portray real businesses that haven't agreed to anything, so they must never
+   * be indexed. 'live': indexable, canonical link, LocalBusiness JSON-LD.
+   */
+  mode?: "demo" | "live";
+  /** Live mode: absolute canonical URL (custom domain root, else /s/:slug). */
+  canonicalUrl?: string;
+  /** Hero and gallery photos. */
+  photos?: SitePhoto[];
+}
+
+/** Only absolute http(s) URLs are rendered as images. */
+function safeImageUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+function heroImage(photos: SitePhoto[]): string {
+  const hero = photos.find((p) => p.role === "hero" && safeImageUrl(p.url));
+  if (!hero) return "";
+  return `<img class="hero-img" src="${esc(hero.url)}" alt="${esc(hero.alt)}" width="1200" height="675" fetchpriority="high" decoding="async" />`;
+}
+
+function gallery(photos: SitePhoto[]): string {
+  const items = photos.filter((p) => p.role === "gallery" && safeImageUrl(p.url));
+  if (!items.length) return "";
+  return `<section class="section" aria-label="Photos">
+    <div class="container">
+      <h2 class="h2">Our Work</h2>
+      <div class="gallery">${items
+        .map(
+          (p) =>
+            `<img src="${esc(p.url)}" alt="${esc(p.alt)}" width="600" height="400" loading="lazy" decoding="async" />`
+        )
+        .join("")}</div>
+    </div>
+  </section>`;
 }
 
 export function renderSite(data: BusinessData, theme: Theme, opts: RenderOptions = {}): string {
+  const live = opts.mode === "live";
+  const photos = opts.photos ?? [];
   const t = THEMES[theme] ?? THEMES.slate;
   const accent = sanitizeHex(data.brandColor);
   const onAccent = onAccentText(accent);
@@ -114,8 +154,12 @@ export function renderSite(data: BusinessData, theme: Theme, opts: RenderOptions
     );
 
   // --- Testimonials (v1 = clearly labeled samples, spec §10) ---
-  const isSample = (data.testimonials || []).some((x) => x.author === SAMPLE_TESTIMONIAL_AUTHOR);
-  const testimonials = (data.testimonials || [])
+  // Live sites never show samples (publish blocks them; this is the backstop).
+  const shownTestimonials = (data.testimonials || []).filter(
+    (x) => !live || x.author !== SAMPLE_TESTIMONIAL_AUTHOR
+  );
+  const isSample = !live && shownTestimonials.some((x) => x.author === SAMPLE_TESTIMONIAL_AUTHOR);
+  const testimonials = shownTestimonials
     .map(
       (x) => `<figure class="quote">
         <blockquote>${esc(x.text)}</blockquote>
@@ -123,7 +167,7 @@ export function renderSite(data: BusinessData, theme: Theme, opts: RenderOptions
       </figure>`
     )
     .join("");
-  const testimonialSection = (data.testimonials || []).length
+  const testimonialSection = shownTestimonials.length
     ? `<section class="section section-alt" aria-label="Reviews">
         <div class="container">
           <h2 class="h2">What customers say</h2>
@@ -149,11 +193,23 @@ export function renderSite(data: BusinessData, theme: Theme, opts: RenderOptions
         </form>`
       : "";
 
+  // --- Indexing ---
+  const robots = live ? "" : `<meta name="robots" content="noindex,nofollow" />`;
+  const canonical = live && opts.canonicalUrl ? `<link rel="canonical" href="${esc(opts.canonicalUrl)}" />` : "";
+  const jsonLd =
+    live && opts.canonicalUrl
+      ? `<script type="application/ld+json">${serializeJsonLd(buildLocalBusinessJsonLd(data, opts.canonicalUrl))}</script>`
+      : "";
+  const footerBy = live
+    ? `<a class="by" href="https://clearedgeintel.com" rel="noopener">Website by ClearEdge Intelligence</a>`
+    : `<span class="by">Demo site built by ClearEdge Intelligence</span>`;
+
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+${robots}
 <title>${esc(data.name)} — ${esc(data.category)} in ${esc(data.city)}, ${esc(data.state)}</title>
 <meta name="description" content="${esc(data.tagline)} ${esc(data.name)} serves ${esc(data.city)}, ${esc(data.state)}." />
 <meta property="og:type" content="website" />
@@ -163,6 +219,8 @@ ${opts.pageUrl ? `<meta property="og:url" content="${esc(opts.pageUrl)}" />` : "
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="${esc(data.name)} — ${esc(data.category)}" />
 <meta name="twitter:description" content="${esc(data.tagline)}" />
+${canonical}
+${jsonLd}
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="${fonts}" rel="stylesheet" />
@@ -278,6 +336,13 @@ ${opts.pageUrl ? `<meta property="og:url" content="${esc(opts.pageUrl)}" />` : "
   footer.site { background: ${t.footerBg}; color: ${t.footerText}; padding: 2.5rem 0; }
   .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
   .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
 
   @media (max-width: 720px) {
     .about-grid { grid-template-columns: 1fr; }
@@ -304,6 +369,7 @@ ${opts.pageUrl ? `<meta property="og:url" content="${esc(opts.pageUrl)}" />` : "
       <p class="tagline">${esc(data.tagline)}</p>
       ${ratingChip(data, "chip")}
       ${heroCtas}
+      ${heroImage(photos)}
     </div>
   </section>
 
@@ -337,6 +403,8 @@ ${opts.pageUrl ? `<meta property="og:url" content="${esc(opts.pageUrl)}" />` : "
     </div>
   </section>
 
+  ${gallery(photos)}
+
   ${testimonialSection}
 
   <section class="cta">
@@ -354,7 +422,7 @@ ${opts.pageUrl ? `<meta property="og:url" content="${esc(opts.pageUrl)}" />` : "
   <footer class="site">
     <div class="container foot">
       <span>${esc(data.name)} · ${esc(data.city)}, ${esc(data.state)}</span>
-      <span class="by">Demo site built by ClearEdge Intelligence</span>
+      ${footerBy}
     </div>
   </footer>
   ${opts.pixelUrl ? `<img src="${esc(opts.pixelUrl)}" alt="" width="1" height="1" style="position:absolute;left:-9999px;" />` : ""}

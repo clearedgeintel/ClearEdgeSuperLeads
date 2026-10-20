@@ -51,6 +51,13 @@ export default function SiteEditor({ id, onBack }: { id: string; onBack: () => v
   const { data: submissions } = useQuery<SiteSubmission[]>({
     queryKey: [`/api/sites/${id}/submissions`],
   });
+  // Signed preview link on the public server (falls back to the in-app preview).
+  // Tokens last 30 minutes; refetch well before that.
+  const { data: preview } = useQuery<{ url: string; external: boolean }>({
+    queryKey: [`/api/sites/${id}/preview-url`],
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+  });
 
   const [site, setSite] = useState<Site | null>(null);
   const [data, setData] = useState<BusinessData | null>(null);
@@ -77,10 +84,11 @@ export default function SiteEditor({ id, onBack }: { id: string; onBack: () => v
     if (loaded) load(loaded);
   }, [loaded]);
 
-  const previewSrc = useMemo(
-    () => (site ? `/api/sites/${site.id}/preview?theme=${theme}&v=${previewKey}` : ''),
-    [site, theme, previewKey]
-  );
+  const previewSrc = useMemo(() => {
+    if (!preview) return '';
+    const sep = preview.url.includes('?') ? '&' : '?';
+    return `${preview.url}${sep}theme=${theme}&v=${previewKey}`;
+  }, [preview, theme, previewKey]);
 
   function touch() {
     setDirty(true);

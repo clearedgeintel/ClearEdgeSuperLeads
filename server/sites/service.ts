@@ -9,8 +9,10 @@ import { createSiteRepository } from './repository';
 import { createGenerator } from './generator';
 import { getProvider, isAnthropicConfigured } from './enrich';
 import { LeadProvider, type LeadSource } from './enrich/lead';
+import { createSiteNotifier } from './mailer';
 
 export const siteRepository = createSiteRepository(db);
+export const siteNotifier = createSiteNotifier(siteRepository);
 
 const leadSource: LeadSource = {
   getLead: (id) => storage.getLead(id),
