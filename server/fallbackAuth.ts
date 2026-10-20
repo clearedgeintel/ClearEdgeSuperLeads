@@ -2,10 +2,21 @@ import type { Express, RequestHandler } from "express";
 import { storage } from "./storage";
 import { nanoid } from "nanoid";
 
+// Demo login is a dev/staging convenience. In production it is only
+// registered when ENABLE_DEMO_LOGIN=true, so the route 404s by default.
+export function isDemoLoginEnabled(): boolean {
+  return process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEMO_LOGIN === 'true';
+}
+
 // Fallback authentication for testing without Google OAuth
 export function setupFallbackAuth(app: Express) {
+  // Public: lets the login page decide whether to show the demo button.
+  app.get('/api/auth/config', (_req, res) => {
+    res.json({ demoLoginEnabled: isDemoLoginEnabled() });
+  });
+
   // Demo login route that creates a test user
-  app.post('/api/auth/demo-login', async (req, res) => {
+  if (isDemoLoginEnabled()) app.post('/api/auth/demo-login', async (req, res) => {
     try {
       // Create or get demo user
       const demoUser = await storage.upsertUser({
