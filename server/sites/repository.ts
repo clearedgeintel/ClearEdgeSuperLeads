@@ -8,10 +8,19 @@
 // The database handle is injected so tests can run against PGlite; the app's
 // instance lives in ./service.ts.
 
-import { and, count, desc, eq, isNull, max, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, isNull, lt, lte, max, sql } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import * as schema from '@shared/schema';
-import { sites, siteSubmissions, siteViews, type SiteRow, type SiteSubmissionRow } from '@shared/schema';
+import {
+  notifications,
+  sites,
+  siteSubmissions,
+  siteViews,
+  users,
+  type SiteRow,
+  type SiteSubmissionRow,
+} from '@shared/schema';
 import {
   THEMES_LIST,
   SITE_STATUSES,
@@ -102,6 +111,13 @@ export interface SitePatch {
   photos?: SitePhoto[];
   notifyEmail?: string | null;
   customDomain?: string | null;
+}
+
+/** A submission whose owner email hasn't gone out, with the site it belongs to. */
+export interface PendingNotification {
+  submission: SiteSubmission;
+  attempts: number;
+  site: Site;
 }
 
 export function createSiteRepository(db: SitesDb) {
@@ -318,6 +334,61 @@ export function createSiteRepository(db: SitesDb) {
         })
         .returning();
       return rowToSubmission(row);
+    },
+
+    // ── Owner notifications ──────────────────────────────────
+
+    async markSubmissionNotified(id: string): Promise<void> {
+      await db.update(siteSubmissions).set({ notifiedAt: new Date() }).where(eq(siteSubmissions.id, id));
+    },
+
+    async recordNotifyFailure(id: string): Promise<void> {
+      await db
+        .update(siteSubmissions)
+        .set({ notifyAttempts: sql`${siteSubmissions.notifyAttempts} + 1` })
+        .where(eq(siteSubmissions.id, id));
+    },
+
+    /** Un-notified submissions created in [since, before) with attempts left, oldest first. */
+    async listPendingNotifications(opts: {
+      since: Date;
+      before: Date;
+      maxAttempts: number;
+      limit: number;
+    }): Promise<PendingNotification[]> {
+      const rows = await db
+        .select({ submission: siteSubmissions, site: sites })
+        .from(siteSubmissions)
+        .innerJoin(sites, eq(sites.id, siteSubmissions.siteId))
+        .where(
+          and(
+            isNull(siteSubmissions.notifiedAt),
+            lt(siteSubmissions.notifyAttempts, opts.maxAttempts),
+            gte(siteSubmissions.createdAt, opts.since),
+            lte(siteSubmissions.createdAt, opts.before),
+            isNull(sites.deletedAt)
+          )
+        )
+        .orderBy(asc(siteSubmissions.createdAt))
+        .limit(opts.limit);
+      return rows.map((r) => ({
+        submission: rowToSubmission(r.submission),
+        attempts: r.submission.notifyAttempts,
+        site: rowToSite(r.site),
+      }));
+    },
+
+    /** One in-app notification per member of the workspace (the bell is per-user). */
+    async notifyWorkspaceMembers(
+      workspaceId: string,
+      n: { type: string; title: string; body: string | null; link: string | null }
+    ): Promise<number> {
+      const members = await db.select({ id: users.id }).from(users).where(eq(users.workspaceId, workspaceId));
+      if (!members.length) return 0;
+      await db.insert(notifications).values(
+        members.map((m) => ({ id: nanoid(), workspaceId, userId: m.id, ...n }))
+      );
+      return members.length;
     },
 
     async recordView(siteId: string, meta: { referrer?: string | null; userAgent?: string | null } = {}) {

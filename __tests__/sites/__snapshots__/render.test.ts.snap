@@ -6,6 +6,7 @@ exports[`renderSite (ported unchanged) sample data, clean theme 1`] = `
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
 <title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
 <meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
 <meta property="og:type" content="website" />
@@ -15,6 +16,8 @@ exports[`renderSite (ported unchanged) sample data, clean theme 1`] = `
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
 <meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -130,6 +133,13 @@ exports[`renderSite (ported unchanged) sample data, clean theme 1`] = `
   footer.site { background: #0f172a; color: #94a3b8; padding: 2.5rem 0; }
   .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
   .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
 
   @media (max-width: 720px) {
     .about-grid { grid-template-columns: 1fr; }
@@ -160,6 +170,7 @@ exports[`renderSite (ported unchanged) sample data, clean theme 1`] = `
       <a class="btn btn-accent btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
       <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
     </div>
+      
     </div>
   </section>
 
@@ -208,6 +219,8 @@ exports[`renderSite (ported unchanged) sample data, clean theme 1`] = `
     </div>
   </section>
 
+  
+
   <section class="section section-alt" aria-label="Reviews">
         <div class="container">
           <h2 class="h2">What customers say</h2>
@@ -247,6 +260,7 @@ exports[`renderSite (ported unchanged) sample data, slate theme 1`] = `
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
 <title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
 <meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
 <meta property="og:type" content="website" />
@@ -256,6 +270,8 @@ exports[`renderSite (ported unchanged) sample data, slate theme 1`] = `
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
 <meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -371,6 +387,13 @@ exports[`renderSite (ported unchanged) sample data, slate theme 1`] = `
   footer.site { background: #0b1222; color: #94a3b8; padding: 2.5rem 0; }
   .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
   .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
 
   @media (max-width: 720px) {
     .about-grid { grid-template-columns: 1fr; }
@@ -401,6 +424,7 @@ exports[`renderSite (ported unchanged) sample data, slate theme 1`] = `
       <a class="btn btn-accent btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
       <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
     </div>
+      
     </div>
   </section>
 
@@ -449,6 +473,8 @@ exports[`renderSite (ported unchanged) sample data, slate theme 1`] = `
     </div>
   </section>
 
+  
+
   <section class="section section-alt" aria-label="Reviews">
         <div class="container">
           <h2 class="h2">What customers say</h2>
@@ -488,6 +514,7 @@ exports[`renderSite (ported unchanged) sample data, warm theme 1`] = `
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
 <title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
 <meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
 <meta property="og:type" content="website" />
@@ -497,6 +524,8 @@ exports[`renderSite (ported unchanged) sample data, warm theme 1`] = `
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
 <meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Nunito+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -612,6 +641,13 @@ exports[`renderSite (ported unchanged) sample data, warm theme 1`] = `
   footer.site { background: #1c1917; color: #a8a29e; padding: 2.5rem 0; }
   .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
   .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
 
   @media (max-width: 720px) {
     .about-grid { grid-template-columns: 1fr; }
@@ -642,6 +678,7 @@ exports[`renderSite (ported unchanged) sample data, warm theme 1`] = `
       <a class="btn btn-accent btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
       <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
     </div>
+      
     </div>
   </section>
 
@@ -690,6 +727,8 @@ exports[`renderSite (ported unchanged) sample data, warm theme 1`] = `
     </div>
   </section>
 
+  
+
   <section class="section section-alt" aria-label="Reviews">
         <div class="container">
           <h2 class="h2">What customers say</h2>
@@ -729,6 +768,7 @@ exports[`renderSite (ported unchanged) with form, page URL and pixel 1`] = `
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
 <title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
 <meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
 <meta property="og:type" content="website" />
@@ -738,6 +778,8 @@ exports[`renderSite (ported unchanged) with form, page URL and pixel 1`] = `
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
 <meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -853,6 +895,13 @@ exports[`renderSite (ported unchanged) with form, page URL and pixel 1`] = `
   footer.site { background: #0b1222; color: #94a3b8; padding: 2.5rem 0; }
   .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
   .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
 
   @media (max-width: 720px) {
     .about-grid { grid-template-columns: 1fr; }
@@ -883,6 +932,7 @@ exports[`renderSite (ported unchanged) with form, page URL and pixel 1`] = `
       <a class="btn btn-accent btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
       <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
     </div>
+      
     </div>
   </section>
 
@@ -938,6 +988,8 @@ exports[`renderSite (ported unchanged) with form, page URL and pixel 1`] = `
       </aside>
     </div>
   </section>
+
+  
 
   <section class="section section-alt" aria-label="Reviews">
         <div class="container">

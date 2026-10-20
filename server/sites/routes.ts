@@ -24,6 +24,7 @@ import { validatePublish } from './publish';
 import { isValidCustomDomain, normalizeCustomDomain } from './domain';
 import { MAX_PHOTO_BYTES, sniffImageType, type PhotoContentType } from './photos';
 import { renderSite } from './template/render';
+import { makePreviewToken } from './previewToken';
 
 export const MAX_PHOTOS_PER_SITE = 30;
 
@@ -32,6 +33,8 @@ export interface SitesRouterDeps {
   generator: SiteGenerator;
   /** PUBLIC_SITE_BASE_URL without a trailing slash, or null when unset. */
   publicBaseUrl(): string | null;
+  /** SITE_PREVIEW_SECRET (shared with the public server), or null when unset. */
+  previewSecret(): string | null;
   photos: {
     isConfigured(): boolean;
     upload(opts: {
@@ -197,6 +200,28 @@ export function createSitesRouter(deps: SitesRouterDeps): Router {
     }
   });
 
+  // Where the editor iframe should load the preview from: the public server with
+  // a short-lived signed token, or this app's authed preview when the public
+  // server isn't configured (dev).
+  router.get('/:id/preview-url', async (req, res) => {
+    try {
+      const site = await repo.getForWorkspace(req.params.id, ws(req));
+      if (!site) return notFound(res);
+      const base = deps.publicBaseUrl();
+      const secret = deps.previewSecret();
+      if (base && secret) {
+        const token = makePreviewToken(site.id, secret);
+        return res.json({
+          url: `${base}/s/${encodeURIComponent(site.slug)}?preview=1&token=${encodeURIComponent(token)}`,
+          external: true,
+        });
+      }
+      res.json({ url: `/api/sites/${site.id}/preview`, external: false });
+    } catch (err) {
+      fail(res, err, 'create a preview link');
+    }
+  });
+
   // Authed preview for the editor iframe. Never posts the form or counts a view.
   router.get('/:id/preview', async (req, res) => {
     try {
@@ -209,7 +234,12 @@ export function createSitesRouter(deps: SitesRouterDeps): Router {
         .set('Cache-Control', 'no-store')
         .set('X-Robots-Tag', 'noindex, nofollow')
         .type('text/html')
-        .send(renderSite(site.data, theme, {}));
+        .send(
+          renderSite(site.data, theme, {
+            mode: site.status === 'live' ? 'live' : 'demo',
+            photos: site.photos,
+          })
+        );
     } catch (err) {
       logger.error({ err }, '[sites] preview failed');
       res.status(500).type('text/plain').send('Could not render the preview.');

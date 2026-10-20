@@ -62,6 +62,7 @@ function setup(opts: { workspace?: boolean; role?: string; site?: Site | null; b
     repo: repo as unknown as SiteRepository,
     generator: generator as unknown as SiteGenerator,
     publicBaseUrl: () => (opts.base === undefined ? 'https://sites.example.com' : opts.base),
+    previewSecret: () => 'test-preview-secret',
     photos,
   };
 

@@ -1,0 +1,1032 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`snapshots demo 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
+<meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta property="og:description" content="Durable roofs, honest work, lasting protection" />
+
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --accent: #b91c1c;
+    --on-accent: #ffffff;
+    --page: #0f172a;
+    --header: rgba(15,23,42,0.85);
+    --surface: #1e293b;
+    --surface-alt: #172033;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--page); color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif; line-height: 1.6;
+  }
+  h1, h2, h3 { font-family: 'Sora', system-ui, sans-serif; line-height: 1.15; margin: 0; }
+  a { color: inherit; }
+  .container { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    padding: .7rem 1.1rem; border-radius: 10px; font-weight: 600; text-decoration: none;
+    border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, opacity .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn-lg { padding: .9rem 1.4rem; font-size: 1.05rem; }
+  .btn-accent { background: var(--accent); color: var(--on-accent); }
+  .btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
+
+  /* Header */
+  header.site {
+    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+    background: var(--header); border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 0; }
+  .brand { font-family: 'Sora', system-ui, sans-serif; font-weight: 800; font-size: 1.15rem; }
+
+  /* Hero */
+  .hero { background: radial-gradient(1200px 600px at 70% -10%, color-mix(in srgb, var(--accent) 35%, transparent), transparent), linear-gradient(180deg, #0b1222 0%, #0f172a 100%); color: #f8fafc; padding: 5rem 0 4rem; }
+  .hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 800; letter-spacing: -.02em; }
+  .hero .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); color: #cbd5e1; margin-top: 1rem; max-width: 40ch; }
+  .hero-ctas { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
+  .chip {
+    display: inline-flex; align-items: center; gap: .4rem; margin-top: 1.2rem;
+    padding: .35rem .7rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: #f8fafc; font-weight: 600; font-size: .95rem;
+  }
+  .chip .stars { color: var(--accent); }
+  .chip .rev { color: #cbd5e1; font-weight: 500; }
+
+  /* Stats */
+  .stats { background: var(--surface-alt); border-bottom: 1px solid var(--border); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; padding: 1.6rem 20px; }
+  .stat { text-align: center; }
+  .stat-val { font-family: 'Sora', system-ui, sans-serif; font-weight: 800; font-size: 1.6rem; color: var(--accent); }
+  .stat-label { color: var(--muted); font-size: .9rem; }
+
+  /* Sections */
+  .section { padding: 4rem 0; }
+  .section-alt { background: var(--surface-alt); }
+  .h2 { font-size: clamp(1.5rem, 3.5vw, 2.2rem); font-weight: 800; margin-bottom: 1.5rem; }
+
+  /* Services grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.3rem; }
+  .card-title { font-size: 1.15rem; font-weight: 700; }
+  .card-desc { color: var(--muted); margin: .5rem 0 0; }
+
+  /* About / area / contact layout */
+  .about-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 2rem; align-items: start; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .area-list { list-style: none; padding: 0; margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+  .area-list li { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 999px; padding: .3rem .8rem; font-size: .9rem; }
+  .crow { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--border); }
+  .crow:last-child { border-bottom: 0; }
+  .clabel { color: var(--muted); }
+
+  /* Lead-capture form */
+  .qform { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: .55rem; }
+  .qhp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  .qinput {
+    width: 100%; padding: .6rem .75rem; border-radius: 10px; font: inherit;
+    color: var(--text); background: var(--surface-alt); border: 1px solid var(--border);
+  }
+  .qinput::placeholder { color: var(--muted); }
+  .qinput:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .qthanks {
+    margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+
+  /* Testimonials */
+  .sample-note { color: var(--muted); font-style: italic; margin-top: -.8rem; margin-bottom: 1.2rem; }
+  .quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .quote { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .quote blockquote { margin: 0; font-size: 1.05rem; }
+  .quote figcaption { margin-top: 1rem; color: var(--muted); font-weight: 600; }
+
+  /* Big CTA */
+  .cta { background: var(--accent); color: var(--on-accent); text-align: center; padding: 4rem 0; }
+  .cta h2 { font-size: clamp(1.6rem, 4vw, 2.4rem); font-weight: 800; }
+  .cta p { opacity: .9; margin: .8rem 0 1.8rem; }
+  .cta .btn-outline { color: var(--on-accent); border-color: color-mix(in srgb, var(--on-accent) 50%, transparent); }
+
+  /* Footer */
+  footer.site { background: #0b1222; color: #94a3b8; padding: 2.5rem 0; }
+  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
+  .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
+
+  @media (max-width: 720px) {
+    .about-grid { grid-template-columns: 1fr; }
+    .hero { padding: 3.5rem 0 3rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn { transition: none; }
+    .btn:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+  <header class="site">
+    <div class="container nav">
+      <span class="brand">Lone Star Roofing Co.</span>
+      <a class="btn btn-accent" href="tel:5125550142">Call (512) 555-0142</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Lone Star Roofing Co.</h1>
+      <p class="tagline">Durable roofs, honest work, lasting protection</p>
+      <span class="chip"><span class="stars" aria-hidden="true">★</span> 4.8 <span class="rev">(126 reviews)</span></span>
+      
+    <div class="hero-ctas">
+      <a class="btn btn-accent btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
+      <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
+    </div>
+      
+    </div>
+  </section>
+
+  <section class="stats" aria-label="Highlights">
+        <div class="container stats-grid">
+          <div class="stat"><div class="stat-val">15+ years</div><div class="stat-label">In business</div></div><div class="stat"><div class="stat-val">4.8 ★</div><div class="stat-label">Rating</div></div><div class="stat"><div class="stat-val">126</div><div class="stat-label">Reviews</div></div><div class="stat"><div class="stat-val">5</div><div class="stat-label">Areas served</div></div>
+        </div>
+      </section>
+
+  <section class="section" aria-label="Services">
+    <div class="container">
+      <h2 class="h2">Our Services</h2>
+      <div class="grid"><article class="card">
+        <h3 class="card-title">Roof Replacement</h3>
+        <p class="card-desc">Full tear-off and new roof systems</p>
+      </article><article class="card">
+        <h3 class="card-title">Storm Damage Repair</h3>
+        <p class="card-desc">Fast response after hail and wind</p>
+      </article><article class="card">
+        <h3 class="card-title">Roof Inspections</h3>
+        <p class="card-desc">Detailed reports for buyers and owners</p>
+      </article><article class="card">
+        <h3 class="card-title">Gutter Installation</h3>
+        <p class="card-desc">Seamless gutters sized to your home</p>
+      </article><article class="card">
+        <h3 class="card-title">Emergency Tarping</h3>
+        <p class="card-desc">Same-day leak protection when it counts</p>
+      </article></div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="contact">
+    <div class="container about-grid">
+      <div>
+        <h2 class="h2">About Lone Star Roofing Co.</h2>
+        <p>Lone Star Roofing has helped Central Texas homeowners protect what matters most for over fifteen years. The team focuses on quality installation, clear communication, and standing behind every job.</p>
+        <h3 style="margin-top:1.5rem;font-size:1.1rem;">Areas We Serve</h3>
+        <ul class="area-list"><li>Austin</li><li>Round Rock</li><li>Cedar Park</li><li>Pflugerville</li><li>Georgetown</li></ul>
+      </div>
+      <aside class="panel" aria-label="Contact">
+        <h3 style="font-size:1.1rem;margin-bottom:.4rem;">Get in touch</h3>
+        <div class="crow"><span class="clabel">Phone</span><a href="tel:5125550142">(512) 555-0142</a></div><div class="crow"><span class="clabel">Hours</span><span>Mon–Sat 7am–6pm</span></div><div class="crow"><span class="clabel">Website</span><a href="https://lonestarroofing.example.com" rel="noopener noreferrer" target="_blank">lonestarroofing.example.com</a></div><div class="crow"><span class="clabel">Map</span><a href="https://www.google.com/maps/place/Lone+Star+Roofing/@30.2672,-97.7431,15z" rel="noopener noreferrer" target="_blank">View on Google Maps</a></div>
+        <a class="btn btn-accent" style="width:100%;margin-top:1rem;" href="tel:5125550142">Call (512) 555-0142</a>
+        <form class="qform" method="post" action="/s/demo/contact">
+          <h3 style="font-size:1.05rem;margin:.2rem 0 .5rem;">Request a free quote</h3>
+          <input type="text" name="website_hp" tabindex="-1" autocomplete="off" aria-hidden="true" class="qhp" />
+          <input class="qinput" type="text" name="name" placeholder="Your name" required />
+          <input class="qinput" type="email" name="email" placeholder="Email" />
+          <input class="qinput" type="tel" name="phone" placeholder="Phone" />
+          <textarea class="qinput" name="message" rows="2" placeholder="What do you need help with?"></textarea>
+          <button class="btn btn-accent" type="submit" style="width:100%;">Send request</button>
+        </form>
+      </aside>
+    </div>
+  </section>
+
+  
+
+  <section class="section section-alt" aria-label="Reviews">
+        <div class="container">
+          <h2 class="h2">What customers say</h2>
+          <p class="sample-note">Sample reviews — replace with real ones before sending.</p>
+          <div class="quotes"><figure class="quote">
+        <blockquote>They replaced our roof in two days and cleaned up like they were never here. Highly recommend.</blockquote>
+        <figcaption>— Sample review — replace with a real one</figcaption>
+      </figure><figure class="quote">
+        <blockquote>Honest quote, no upselling, and the crew was professional from start to finish.</blockquote>
+        <figcaption>— Sample review — replace with a real one</figcaption>
+      </figure></div>
+        </div>
+      </section>
+
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to get started?</h2>
+      <p>Lone Star Roofing Co. proudly serves Austin, TX and nearby.</p>
+      <a class="btn btn-outline btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
+    </div>
+  </section>
+
+  <footer class="site">
+    <div class="container foot">
+      <span>Lone Star Roofing Co. · Austin, TX</span>
+      <span class="by">Demo site built by ClearEdge Intelligence</span>
+    </div>
+  </footer>
+  
+</body>
+</html>"
+`;
+
+exports[`snapshots live, no photos 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
+<meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta property="og:description" content="Durable roofs, honest work, lasting protection" />
+
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+<link rel="canonical" href="https://example-roofing.com/" />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"RoofingContractor","name":"Lone Star Roofing Co.","url":"https://example-roofing.com/","telephone":"(512) 555-0100","address":{"@type":"PostalAddress","addressLocality":"Austin","addressRegion":"TX","addressCountry":"US"},"areaServed":[{"@type":"City","name":"Austin"},{"@type":"City","name":"Round Rock"},{"@type":"City","name":"Cedar Park"},{"@type":"City","name":"Pflugerville"},{"@type":"City","name":"Georgetown"}],"openingHours":["Mo-Fr 08:00-18:00","Sa 09:00-14:00"]}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --accent: #b91c1c;
+    --on-accent: #ffffff;
+    --page: #ffffff;
+    --header: rgba(255,255,255,0.9);
+    --surface: #ffffff;
+    --surface-alt: #f8fafc;
+    --text: #0f172a;
+    --muted: #64748b;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--page); color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif; line-height: 1.6;
+  }
+  h1, h2, h3 { font-family: 'Manrope', system-ui, sans-serif; line-height: 1.15; margin: 0; }
+  a { color: inherit; }
+  .container { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    padding: .7rem 1.1rem; border-radius: 10px; font-weight: 600; text-decoration: none;
+    border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, opacity .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn-lg { padding: .9rem 1.4rem; font-size: 1.05rem; }
+  .btn-accent { background: var(--accent); color: var(--on-accent); }
+  .btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
+
+  /* Header */
+  header.site {
+    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+    background: var(--header); border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 0; }
+  .brand { font-family: 'Manrope', system-ui, sans-serif; font-weight: 800; font-size: 1.15rem; }
+
+  /* Hero */
+  .hero { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, #ffffff) 0%, #ffffff 100%); color: #0f172a; padding: 5rem 0 4rem; }
+  .hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 800; letter-spacing: -.02em; }
+  .hero .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); color: #475569; margin-top: 1rem; max-width: 40ch; }
+  .hero-ctas { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
+  .chip {
+    display: inline-flex; align-items: center; gap: .4rem; margin-top: 1.2rem;
+    padding: .35rem .7rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: #0f172a; font-weight: 600; font-size: .95rem;
+  }
+  .chip .stars { color: var(--accent); }
+  .chip .rev { color: #475569; font-weight: 500; }
+
+  /* Stats */
+  .stats { background: var(--surface-alt); border-bottom: 1px solid var(--border); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; padding: 1.6rem 20px; }
+  .stat { text-align: center; }
+  .stat-val { font-family: 'Manrope', system-ui, sans-serif; font-weight: 800; font-size: 1.6rem; color: var(--accent); }
+  .stat-label { color: var(--muted); font-size: .9rem; }
+
+  /* Sections */
+  .section { padding: 4rem 0; }
+  .section-alt { background: var(--surface-alt); }
+  .h2 { font-size: clamp(1.5rem, 3.5vw, 2.2rem); font-weight: 800; margin-bottom: 1.5rem; }
+
+  /* Services grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.3rem; }
+  .card-title { font-size: 1.15rem; font-weight: 700; }
+  .card-desc { color: var(--muted); margin: .5rem 0 0; }
+
+  /* About / area / contact layout */
+  .about-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 2rem; align-items: start; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .area-list { list-style: none; padding: 0; margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+  .area-list li { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 999px; padding: .3rem .8rem; font-size: .9rem; }
+  .crow { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--border); }
+  .crow:last-child { border-bottom: 0; }
+  .clabel { color: var(--muted); }
+
+  /* Lead-capture form */
+  .qform { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: .55rem; }
+  .qhp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  .qinput {
+    width: 100%; padding: .6rem .75rem; border-radius: 10px; font: inherit;
+    color: var(--text); background: var(--surface-alt); border: 1px solid var(--border);
+  }
+  .qinput::placeholder { color: var(--muted); }
+  .qinput:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .qthanks {
+    margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+
+  /* Testimonials */
+  .sample-note { color: var(--muted); font-style: italic; margin-top: -.8rem; margin-bottom: 1.2rem; }
+  .quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .quote { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .quote blockquote { margin: 0; font-size: 1.05rem; }
+  .quote figcaption { margin-top: 1rem; color: var(--muted); font-weight: 600; }
+
+  /* Big CTA */
+  .cta { background: var(--accent); color: var(--on-accent); text-align: center; padding: 4rem 0; }
+  .cta h2 { font-size: clamp(1.6rem, 4vw, 2.4rem); font-weight: 800; }
+  .cta p { opacity: .9; margin: .8rem 0 1.8rem; }
+  .cta .btn-outline { color: var(--on-accent); border-color: color-mix(in srgb, var(--on-accent) 50%, transparent); }
+
+  /* Footer */
+  footer.site { background: #0f172a; color: #94a3b8; padding: 2.5rem 0; }
+  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
+  .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
+
+  @media (max-width: 720px) {
+    .about-grid { grid-template-columns: 1fr; }
+    .hero { padding: 3.5rem 0 3rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn { transition: none; }
+    .btn:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+  <header class="site">
+    <div class="container nav">
+      <span class="brand">Lone Star Roofing Co.</span>
+      <a class="btn btn-accent" href="tel:5125550100">Call (512) 555-0100</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Lone Star Roofing Co.</h1>
+      <p class="tagline">Durable roofs, honest work, lasting protection</p>
+      <span class="chip"><span class="stars" aria-hidden="true">★</span> 4.8 <span class="rev">(126 reviews)</span></span>
+      
+    <div class="hero-ctas">
+      <a class="btn btn-accent btn-lg" href="tel:5125550100">Call (512) 555-0100</a>
+      <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
+    </div>
+      
+    </div>
+  </section>
+
+  <section class="stats" aria-label="Highlights">
+        <div class="container stats-grid">
+          <div class="stat"><div class="stat-val">15+ years</div><div class="stat-label">In business</div></div><div class="stat"><div class="stat-val">4.8 ★</div><div class="stat-label">Rating</div></div><div class="stat"><div class="stat-val">126</div><div class="stat-label">Reviews</div></div><div class="stat"><div class="stat-val">5</div><div class="stat-label">Areas served</div></div>
+        </div>
+      </section>
+
+  <section class="section" aria-label="Services">
+    <div class="container">
+      <h2 class="h2">Our Services</h2>
+      <div class="grid"><article class="card">
+        <h3 class="card-title">Roof Replacement</h3>
+        <p class="card-desc">Full tear-off and new roof systems</p>
+      </article><article class="card">
+        <h3 class="card-title">Storm Damage Repair</h3>
+        <p class="card-desc">Fast response after hail and wind</p>
+      </article><article class="card">
+        <h3 class="card-title">Roof Inspections</h3>
+        <p class="card-desc">Detailed reports for buyers and owners</p>
+      </article><article class="card">
+        <h3 class="card-title">Gutter Installation</h3>
+        <p class="card-desc">Seamless gutters sized to your home</p>
+      </article><article class="card">
+        <h3 class="card-title">Emergency Tarping</h3>
+        <p class="card-desc">Same-day leak protection when it counts</p>
+      </article></div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="contact">
+    <div class="container about-grid">
+      <div>
+        <h2 class="h2">About Lone Star Roofing Co.</h2>
+        <p>Lone Star Roofing has helped Central Texas homeowners protect what matters most for over fifteen years. The team focuses on quality installation, clear communication, and standing behind every job.</p>
+        <h3 style="margin-top:1.5rem;font-size:1.1rem;">Areas We Serve</h3>
+        <ul class="area-list"><li>Austin</li><li>Round Rock</li><li>Cedar Park</li><li>Pflugerville</li><li>Georgetown</li></ul>
+      </div>
+      <aside class="panel" aria-label="Contact">
+        <h3 style="font-size:1.1rem;margin-bottom:.4rem;">Get in touch</h3>
+        <div class="crow"><span class="clabel">Phone</span><a href="tel:5125550100">(512) 555-0100</a></div><div class="crow"><span class="clabel">Hours</span><span>Mon-Fri 8am-6pm, Sat 9am-2pm, Sun closed</span></div><div class="crow"><span class="clabel">Website</span><a href="https://lonestarroofing.example.com" rel="noopener noreferrer" target="_blank">lonestarroofing.example.com</a></div><div class="crow"><span class="clabel">Map</span><a href="https://www.google.com/maps/place/Lone+Star+Roofing/@30.2672,-97.7431,15z" rel="noopener noreferrer" target="_blank">View on Google Maps</a></div>
+        <a class="btn btn-accent" style="width:100%;margin-top:1rem;" href="tel:5125550100">Call (512) 555-0100</a>
+        <form class="qform" method="post" action="/contact">
+          <h3 style="font-size:1.05rem;margin:.2rem 0 .5rem;">Request a free quote</h3>
+          <input type="text" name="website_hp" tabindex="-1" autocomplete="off" aria-hidden="true" class="qhp" />
+          <input class="qinput" type="text" name="name" placeholder="Your name" required />
+          <input class="qinput" type="email" name="email" placeholder="Email" />
+          <input class="qinput" type="tel" name="phone" placeholder="Phone" />
+          <textarea class="qinput" name="message" rows="2" placeholder="What do you need help with?"></textarea>
+          <button class="btn btn-accent" type="submit" style="width:100%;">Send request</button>
+        </form>
+      </aside>
+    </div>
+  </section>
+
+  
+
+  <section class="section section-alt" aria-label="Reviews">
+        <div class="container">
+          <h2 class="h2">What customers say</h2>
+          
+          <div class="quotes"><figure class="quote">
+        <blockquote>Fixed our roof fast.</blockquote>
+        <figcaption>— Pat R.</figcaption>
+      </figure></div>
+        </div>
+      </section>
+
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to get started?</h2>
+      <p>Lone Star Roofing Co. proudly serves Austin, TX and nearby.</p>
+      <a class="btn btn-outline btn-lg" href="tel:5125550100">Call (512) 555-0100</a>
+    </div>
+  </section>
+
+  <footer class="site">
+    <div class="container foot">
+      <span>Lone Star Roofing Co. · Austin, TX</span>
+      <a class="by" href="https://clearedgeintel.com" rel="noopener">Website by ClearEdge Intelligence</a>
+    </div>
+  </footer>
+  <img src="/pixel.gif" alt="" width="1" height="1" style="position:absolute;left:-9999px;" />
+</body>
+</html>"
+`;
+
+exports[`snapshots live, with photos 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
+<meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta property="og:description" content="Durable roofs, honest work, lasting protection" />
+
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+<link rel="canonical" href="https://example-roofing.com/" />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"RoofingContractor","name":"Lone Star Roofing Co.","url":"https://example-roofing.com/","telephone":"(512) 555-0100","address":{"@type":"PostalAddress","addressLocality":"Austin","addressRegion":"TX","addressCountry":"US"},"areaServed":[{"@type":"City","name":"Austin"},{"@type":"City","name":"Round Rock"},{"@type":"City","name":"Cedar Park"},{"@type":"City","name":"Pflugerville"},{"@type":"City","name":"Georgetown"}],"openingHours":["Mo-Fr 08:00-18:00","Sa 09:00-14:00"]}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Nunito+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --accent: #b91c1c;
+    --on-accent: #ffffff;
+    --page: #fffaf5;
+    --header: rgba(255,250,245,0.9);
+    --surface: #ffffff;
+    --surface-alt: #fdf3e9;
+    --text: #292524;
+    --muted: #78716c;
+    --border: #f0e2d2;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--page); color: var(--text);
+    font-family: 'Nunito Sans', system-ui, sans-serif; line-height: 1.6;
+  }
+  h1, h2, h3 { font-family: 'Poppins', system-ui, sans-serif; line-height: 1.15; margin: 0; }
+  a { color: inherit; }
+  .container { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    padding: .7rem 1.1rem; border-radius: 10px; font-weight: 600; text-decoration: none;
+    border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, opacity .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn-lg { padding: .9rem 1.4rem; font-size: 1.05rem; }
+  .btn-accent { background: var(--accent); color: var(--on-accent); }
+  .btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
+
+  /* Header */
+  header.site {
+    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+    background: var(--header); border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 0; }
+  .brand { font-family: 'Poppins', system-ui, sans-serif; font-weight: 800; font-size: 1.15rem; }
+
+  /* Hero */
+  .hero { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, #fffaf5) 0%, #fffaf5 100%); color: #1c1917; padding: 5rem 0 4rem; }
+  .hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 800; letter-spacing: -.02em; }
+  .hero .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); color: #57534e; margin-top: 1rem; max-width: 40ch; }
+  .hero-ctas { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
+  .chip {
+    display: inline-flex; align-items: center; gap: .4rem; margin-top: 1.2rem;
+    padding: .35rem .7rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: #1c1917; font-weight: 600; font-size: .95rem;
+  }
+  .chip .stars { color: var(--accent); }
+  .chip .rev { color: #57534e; font-weight: 500; }
+
+  /* Stats */
+  .stats { background: var(--surface-alt); border-bottom: 1px solid var(--border); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; padding: 1.6rem 20px; }
+  .stat { text-align: center; }
+  .stat-val { font-family: 'Poppins', system-ui, sans-serif; font-weight: 800; font-size: 1.6rem; color: var(--accent); }
+  .stat-label { color: var(--muted); font-size: .9rem; }
+
+  /* Sections */
+  .section { padding: 4rem 0; }
+  .section-alt { background: var(--surface-alt); }
+  .h2 { font-size: clamp(1.5rem, 3.5vw, 2.2rem); font-weight: 800; margin-bottom: 1.5rem; }
+
+  /* Services grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.3rem; }
+  .card-title { font-size: 1.15rem; font-weight: 700; }
+  .card-desc { color: var(--muted); margin: .5rem 0 0; }
+
+  /* About / area / contact layout */
+  .about-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 2rem; align-items: start; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .area-list { list-style: none; padding: 0; margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+  .area-list li { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 999px; padding: .3rem .8rem; font-size: .9rem; }
+  .crow { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--border); }
+  .crow:last-child { border-bottom: 0; }
+  .clabel { color: var(--muted); }
+
+  /* Lead-capture form */
+  .qform { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: .55rem; }
+  .qhp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  .qinput {
+    width: 100%; padding: .6rem .75rem; border-radius: 10px; font: inherit;
+    color: var(--text); background: var(--surface-alt); border: 1px solid var(--border);
+  }
+  .qinput::placeholder { color: var(--muted); }
+  .qinput:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .qthanks {
+    margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+
+  /* Testimonials */
+  .sample-note { color: var(--muted); font-style: italic; margin-top: -.8rem; margin-bottom: 1.2rem; }
+  .quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .quote { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .quote blockquote { margin: 0; font-size: 1.05rem; }
+  .quote figcaption { margin-top: 1rem; color: var(--muted); font-weight: 600; }
+
+  /* Big CTA */
+  .cta { background: var(--accent); color: var(--on-accent); text-align: center; padding: 4rem 0; }
+  .cta h2 { font-size: clamp(1.6rem, 4vw, 2.4rem); font-weight: 800; }
+  .cta p { opacity: .9; margin: .8rem 0 1.8rem; }
+  .cta .btn-outline { color: var(--on-accent); border-color: color-mix(in srgb, var(--on-accent) 50%, transparent); }
+
+  /* Footer */
+  footer.site { background: #1c1917; color: #a8a29e; padding: 2.5rem 0; }
+  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
+  .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
+
+  @media (max-width: 720px) {
+    .about-grid { grid-template-columns: 1fr; }
+    .hero { padding: 3.5rem 0 3rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn { transition: none; }
+    .btn:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+  <header class="site">
+    <div class="container nav">
+      <span class="brand">Lone Star Roofing Co.</span>
+      <a class="btn btn-accent" href="tel:5125550100">Call (512) 555-0100</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Lone Star Roofing Co.</h1>
+      <p class="tagline">Durable roofs, honest work, lasting protection</p>
+      <span class="chip"><span class="stars" aria-hidden="true">★</span> 4.8 <span class="rev">(126 reviews)</span></span>
+      
+    <div class="hero-ctas">
+      <a class="btn btn-accent btn-lg" href="tel:5125550100">Call (512) 555-0100</a>
+      <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
+    </div>
+      <img class="hero-img" src="https://cdn.example.com/hero.jpg" alt="Crew on a roof" width="1200" height="675" fetchpriority="high" decoding="async" />
+    </div>
+  </section>
+
+  <section class="stats" aria-label="Highlights">
+        <div class="container stats-grid">
+          <div class="stat"><div class="stat-val">15+ years</div><div class="stat-label">In business</div></div><div class="stat"><div class="stat-val">4.8 ★</div><div class="stat-label">Rating</div></div><div class="stat"><div class="stat-val">126</div><div class="stat-label">Reviews</div></div><div class="stat"><div class="stat-val">5</div><div class="stat-label">Areas served</div></div>
+        </div>
+      </section>
+
+  <section class="section" aria-label="Services">
+    <div class="container">
+      <h2 class="h2">Our Services</h2>
+      <div class="grid"><article class="card">
+        <h3 class="card-title">Roof Replacement</h3>
+        <p class="card-desc">Full tear-off and new roof systems</p>
+      </article><article class="card">
+        <h3 class="card-title">Storm Damage Repair</h3>
+        <p class="card-desc">Fast response after hail and wind</p>
+      </article><article class="card">
+        <h3 class="card-title">Roof Inspections</h3>
+        <p class="card-desc">Detailed reports for buyers and owners</p>
+      </article><article class="card">
+        <h3 class="card-title">Gutter Installation</h3>
+        <p class="card-desc">Seamless gutters sized to your home</p>
+      </article><article class="card">
+        <h3 class="card-title">Emergency Tarping</h3>
+        <p class="card-desc">Same-day leak protection when it counts</p>
+      </article></div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="contact">
+    <div class="container about-grid">
+      <div>
+        <h2 class="h2">About Lone Star Roofing Co.</h2>
+        <p>Lone Star Roofing has helped Central Texas homeowners protect what matters most for over fifteen years. The team focuses on quality installation, clear communication, and standing behind every job.</p>
+        <h3 style="margin-top:1.5rem;font-size:1.1rem;">Areas We Serve</h3>
+        <ul class="area-list"><li>Austin</li><li>Round Rock</li><li>Cedar Park</li><li>Pflugerville</li><li>Georgetown</li></ul>
+      </div>
+      <aside class="panel" aria-label="Contact">
+        <h3 style="font-size:1.1rem;margin-bottom:.4rem;">Get in touch</h3>
+        <div class="crow"><span class="clabel">Phone</span><a href="tel:5125550100">(512) 555-0100</a></div><div class="crow"><span class="clabel">Hours</span><span>Mon-Fri 8am-6pm, Sat 9am-2pm, Sun closed</span></div><div class="crow"><span class="clabel">Website</span><a href="https://lonestarroofing.example.com" rel="noopener noreferrer" target="_blank">lonestarroofing.example.com</a></div><div class="crow"><span class="clabel">Map</span><a href="https://www.google.com/maps/place/Lone+Star+Roofing/@30.2672,-97.7431,15z" rel="noopener noreferrer" target="_blank">View on Google Maps</a></div>
+        <a class="btn btn-accent" style="width:100%;margin-top:1rem;" href="tel:5125550100">Call (512) 555-0100</a>
+        
+      </aside>
+    </div>
+  </section>
+
+  <section class="section" aria-label="Photos">
+    <div class="container">
+      <h2 class="h2">Our Work</h2>
+      <div class="gallery"><img src="https://cdn.example.com/g1.jpg" alt="Finished job" width="600" height="400" loading="lazy" decoding="async" /><img src="https://cdn.example.com/g2.jpg" alt="Before and after" width="600" height="400" loading="lazy" decoding="async" /></div>
+    </div>
+  </section>
+
+  <section class="section section-alt" aria-label="Reviews">
+        <div class="container">
+          <h2 class="h2">What customers say</h2>
+          
+          <div class="quotes"><figure class="quote">
+        <blockquote>Fixed our roof fast.</blockquote>
+        <figcaption>— Pat R.</figcaption>
+      </figure></div>
+        </div>
+      </section>
+
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to get started?</h2>
+      <p>Lone Star Roofing Co. proudly serves Austin, TX and nearby.</p>
+      <a class="btn btn-outline btn-lg" href="tel:5125550100">Call (512) 555-0100</a>
+    </div>
+  </section>
+
+  <footer class="site">
+    <div class="container foot">
+      <span>Lone Star Roofing Co. · Austin, TX</span>
+      <a class="by" href="https://clearedgeintel.com" rel="noopener">Website by ClearEdge Intelligence</a>
+    </div>
+  </footer>
+  
+</body>
+</html>"
+`;
+
+exports[`snapshots sample data 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Lone Star Roofing Co. — Roofing Contractor in Austin, TX</title>
+<meta name="description" content="Durable roofs, honest work, lasting protection Lone Star Roofing Co. serves Austin, TX." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta property="og:description" content="Durable roofs, honest work, lasting protection" />
+
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Lone Star Roofing Co. — Roofing Contractor" />
+<meta name="twitter:description" content="Durable roofs, honest work, lasting protection" />
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Nunito+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --accent: #b91c1c;
+    --on-accent: #ffffff;
+    --page: #fffaf5;
+    --header: rgba(255,250,245,0.9);
+    --surface: #ffffff;
+    --surface-alt: #fdf3e9;
+    --text: #292524;
+    --muted: #78716c;
+    --border: #f0e2d2;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--page); color: var(--text);
+    font-family: 'Nunito Sans', system-ui, sans-serif; line-height: 1.6;
+  }
+  h1, h2, h3 { font-family: 'Poppins', system-ui, sans-serif; line-height: 1.15; margin: 0; }
+  a { color: inherit; }
+  .container { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    padding: .7rem 1.1rem; border-radius: 10px; font-weight: 600; text-decoration: none;
+    border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, opacity .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn-lg { padding: .9rem 1.4rem; font-size: 1.05rem; }
+  .btn-accent { background: var(--accent); color: var(--on-accent); }
+  .btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
+
+  /* Header */
+  header.site {
+    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+    background: var(--header); border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 0; }
+  .brand { font-family: 'Poppins', system-ui, sans-serif; font-weight: 800; font-size: 1.15rem; }
+
+  /* Hero */
+  .hero { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, #fffaf5) 0%, #fffaf5 100%); color: #1c1917; padding: 5rem 0 4rem; }
+  .hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 800; letter-spacing: -.02em; }
+  .hero .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); color: #57534e; margin-top: 1rem; max-width: 40ch; }
+  .hero-ctas { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 2rem; }
+  .chip {
+    display: inline-flex; align-items: center; gap: .4rem; margin-top: 1.2rem;
+    padding: .35rem .7rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: #1c1917; font-weight: 600; font-size: .95rem;
+  }
+  .chip .stars { color: var(--accent); }
+  .chip .rev { color: #57534e; font-weight: 500; }
+
+  /* Stats */
+  .stats { background: var(--surface-alt); border-bottom: 1px solid var(--border); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; padding: 1.6rem 20px; }
+  .stat { text-align: center; }
+  .stat-val { font-family: 'Poppins', system-ui, sans-serif; font-weight: 800; font-size: 1.6rem; color: var(--accent); }
+  .stat-label { color: var(--muted); font-size: .9rem; }
+
+  /* Sections */
+  .section { padding: 4rem 0; }
+  .section-alt { background: var(--surface-alt); }
+  .h2 { font-size: clamp(1.5rem, 3.5vw, 2.2rem); font-weight: 800; margin-bottom: 1.5rem; }
+
+  /* Services grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.3rem; }
+  .card-title { font-size: 1.15rem; font-weight: 700; }
+  .card-desc { color: var(--muted); margin: .5rem 0 0; }
+
+  /* About / area / contact layout */
+  .about-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 2rem; align-items: start; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .area-list { list-style: none; padding: 0; margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+  .area-list li { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 999px; padding: .3rem .8rem; font-size: .9rem; }
+  .crow { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--border); }
+  .crow:last-child { border-bottom: 0; }
+  .clabel { color: var(--muted); }
+
+  /* Lead-capture form */
+  .qform { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: .55rem; }
+  .qhp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  .qinput {
+    width: 100%; padding: .6rem .75rem; border-radius: 10px; font: inherit;
+    color: var(--text); background: var(--surface-alt); border: 1px solid var(--border);
+  }
+  .qinput::placeholder { color: var(--muted); }
+  .qinput:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .qthanks {
+    margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+
+  /* Testimonials */
+  .sample-note { color: var(--muted); font-style: italic; margin-top: -.8rem; margin-bottom: 1.2rem; }
+  .quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .quote { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem; }
+  .quote blockquote { margin: 0; font-size: 1.05rem; }
+  .quote figcaption { margin-top: 1rem; color: var(--muted); font-weight: 600; }
+
+  /* Big CTA */
+  .cta { background: var(--accent); color: var(--on-accent); text-align: center; padding: 4rem 0; }
+  .cta h2 { font-size: clamp(1.6rem, 4vw, 2.4rem); font-weight: 800; }
+  .cta p { opacity: .9; margin: .8rem 0 1.8rem; }
+  .cta .btn-outline { color: var(--on-accent); border-color: color-mix(in srgb, var(--on-accent) 50%, transparent); }
+
+  /* Footer */
+  footer.site { background: #1c1917; color: #a8a29e; padding: 2.5rem 0; }
+  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; }
+  .foot .by { font-size: .9rem; }
+  a.by { font-size: .8rem; opacity: .8; text-decoration: none; }
+  a.by:hover { text-decoration: underline; }
+
+  /* Photos */
+  .hero-img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-top: 2rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 12px; background: var(--surface-alt); }
+
+  @media (max-width: 720px) {
+    .about-grid { grid-template-columns: 1fr; }
+    .hero { padding: 3.5rem 0 3rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn { transition: none; }
+    .btn:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+  <header class="site">
+    <div class="container nav">
+      <span class="brand">Lone Star Roofing Co.</span>
+      <a class="btn btn-accent" href="tel:5125550142">Call (512) 555-0142</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Lone Star Roofing Co.</h1>
+      <p class="tagline">Durable roofs, honest work, lasting protection</p>
+      <span class="chip"><span class="stars" aria-hidden="true">★</span> 4.8 <span class="rev">(126 reviews)</span></span>
+      
+    <div class="hero-ctas">
+      <a class="btn btn-accent btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
+      <a class="btn btn-outline btn-lg" href="#contact">Get a Free Quote</a>
+    </div>
+      
+    </div>
+  </section>
+
+  <section class="stats" aria-label="Highlights">
+        <div class="container stats-grid">
+          <div class="stat"><div class="stat-val">15+ years</div><div class="stat-label">In business</div></div><div class="stat"><div class="stat-val">4.8 ★</div><div class="stat-label">Rating</div></div><div class="stat"><div class="stat-val">126</div><div class="stat-label">Reviews</div></div><div class="stat"><div class="stat-val">5</div><div class="stat-label">Areas served</div></div>
+        </div>
+      </section>
+
+  <section class="section" aria-label="Services">
+    <div class="container">
+      <h2 class="h2">Our Services</h2>
+      <div class="grid"><article class="card">
+        <h3 class="card-title">Roof Replacement</h3>
+        <p class="card-desc">Full tear-off and new roof systems</p>
+      </article><article class="card">
+        <h3 class="card-title">Storm Damage Repair</h3>
+        <p class="card-desc">Fast response after hail and wind</p>
+      </article><article class="card">
+        <h3 class="card-title">Roof Inspections</h3>
+        <p class="card-desc">Detailed reports for buyers and owners</p>
+      </article><article class="card">
+        <h3 class="card-title">Gutter Installation</h3>
+        <p class="card-desc">Seamless gutters sized to your home</p>
+      </article><article class="card">
+        <h3 class="card-title">Emergency Tarping</h3>
+        <p class="card-desc">Same-day leak protection when it counts</p>
+      </article></div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="contact">
+    <div class="container about-grid">
+      <div>
+        <h2 class="h2">About Lone Star Roofing Co.</h2>
+        <p>Lone Star Roofing has helped Central Texas homeowners protect what matters most for over fifteen years. The team focuses on quality installation, clear communication, and standing behind every job.</p>
+        <h3 style="margin-top:1.5rem;font-size:1.1rem;">Areas We Serve</h3>
+        <ul class="area-list"><li>Austin</li><li>Round Rock</li><li>Cedar Park</li><li>Pflugerville</li><li>Georgetown</li></ul>
+      </div>
+      <aside class="panel" aria-label="Contact">
+        <h3 style="font-size:1.1rem;margin-bottom:.4rem;">Get in touch</h3>
+        <div class="crow"><span class="clabel">Phone</span><a href="tel:5125550142">(512) 555-0142</a></div><div class="crow"><span class="clabel">Hours</span><span>Mon–Sat 7am–6pm</span></div><div class="crow"><span class="clabel">Website</span><a href="https://lonestarroofing.example.com" rel="noopener noreferrer" target="_blank">lonestarroofing.example.com</a></div><div class="crow"><span class="clabel">Map</span><a href="https://www.google.com/maps/place/Lone+Star+Roofing/@30.2672,-97.7431,15z" rel="noopener noreferrer" target="_blank">View on Google Maps</a></div>
+        <a class="btn btn-accent" style="width:100%;margin-top:1rem;" href="tel:5125550142">Call (512) 555-0142</a>
+        
+      </aside>
+    </div>
+  </section>
+
+  
+
+  <section class="section section-alt" aria-label="Reviews">
+        <div class="container">
+          <h2 class="h2">What customers say</h2>
+          <p class="sample-note">Sample reviews — replace with real ones before sending.</p>
+          <div class="quotes"><figure class="quote">
+        <blockquote>They replaced our roof in two days and cleaned up like they were never here. Highly recommend.</blockquote>
+        <figcaption>— Sample review — replace with a real one</figcaption>
+      </figure><figure class="quote">
+        <blockquote>Honest quote, no upselling, and the crew was professional from start to finish.</blockquote>
+        <figcaption>— Sample review — replace with a real one</figcaption>
+      </figure></div>
+        </div>
+      </section>
+
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to get started?</h2>
+      <p>Lone Star Roofing Co. proudly serves Austin, TX and nearby.</p>
+      <a class="btn btn-outline btn-lg" href="tel:5125550142">Call (512) 555-0142</a>
+    </div>
+  </section>
+
+  <footer class="site">
+    <div class="container foot">
+      <span>Lone Star Roofing Co. · Austin, TX</span>
+      <span class="by">Demo site built by ClearEdge Intelligence</span>
+    </div>
+  </footer>
+  
+</body>
+</html>"
+`;

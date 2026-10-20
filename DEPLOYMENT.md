@@ -6,13 +6,48 @@ Production deployment notes for the ClearEdge Outreach Platform. Target host: **
 
 | Step | Command | Notes |
 |------|---------|-------|
-| Build | `npm run build` | Vite builds the client to `dist/public`; esbuild bundles the server to `dist/index.js`. |
-| Start | `npm start` | Runs `NODE_ENV=production node dist/index.js`. |
-| Migrate | `npm run db:push` | Drizzle pushes `shared/schema.ts` to the database. Run against the prod DB once per schema change. |
+| Build | `npm run build` | Vite builds the client to `dist/public`; esbuild bundles the admin server to `dist/index.js` and the public site server to `dist/public.js`. |
+| Start | `npm start` | Runs `NODE_ENV=production node dist/index.js` (admin app). |
+| Migrate | see [migrations/](migrations/README.md) | Reviewed, additive SQL applied by hand. **Never run `drizzle-kit push` against production**: the database is shared with the Instant Site service. |
 
 [railway.json](railway.json) wires `buildCommand`, `startCommand`, and `healthcheckPath: /api/health` so Railway's Nixpacks builder runs the full build and probes health correctly. `engines.node >=20` pins the runtime.
 
 The server binds `0.0.0.0` and reads `process.env.PORT` (Railway injects it), so no host/port changes are needed.
+
+## Two services: `app` and `public`
+
+One repo runs as two Railway services. The split means a bad admin deploy or a
+runaway job can't take a client's website offline.
+
+| | `app` (admin) | `public` (sites) |
+|---|---|---|
+| Entry point | `server/index.ts` | `server/public.ts` |
+| Serves | Admin UI, `/api/*`, scheduler, jobs | `/s/:slug`, quote form, view pixel, robots/sitemap, custom domains |
+| Railway config file | `railway.json` (default) | `railway.public.json` |
+| Build | `npm run build` | `npm run build:public` |
+| Start | `npm start` | `npm run start:public` |
+| Healthcheck | `/api/health` | `/healthz` |
+
+**Setting up the `public` service** (same repo):
+1. In Railway, add a service from the same GitHub repo.
+2. Settings → *Config-as-code* → set the path to `/railway.public.json`. Otherwise it reads
+   `railway.json` and starts the admin app.
+3. Set only these variables:
+   - `DATABASE_URL`
+   - `PUBLIC_SITE_BASE_URL` (its own public URL, e.g. `https://sites.clearedgeintel.com`)
+   - `RESEND_API_KEY`, `RESEND_TRANSACTIONAL_FROM_EMAIL`, `RESEND_FROM_NAME` (owner
+     notifications; without the transactional address they're held for retry, never sent from the
+     outreach domain)
+   - `SITE_PREVIEW_SECRET` (same value as on `app`)
+   - `APP_URL` (the admin app's URL; lets the editor frame previews)
+   - optional `PUBLIC_SITE_EXTRA_HOSTS`
+
+   Do **not** give it `SESSION_SECRET`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY` or outreach
+   credentials.
+4. Add `PUBLIC_SITE_BASE_URL` and `SITE_PREVIEW_SECRET` to the `app` service too.
+
+Unknown hosts get a 404 from `public`. Hosts listed in `PUBLIC_SITE_BASE_URL` / `PUBLIC_SITE_EXTRA_HOSTS`
+serve `/s/:slug`; any other host must be a live site's custom domain.
 
 ## ⚠️ Single-instance scheduler
 

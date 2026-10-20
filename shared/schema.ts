@@ -664,10 +664,19 @@ export const siteSubmissions = pgTable(
     phone: text('phone'),
     message: text('message'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+
+    // Added by migrations/0002_site_submission_notify.sql (Phase 3). notified_at
+    // stays null until the owner email is sent (or none is needed); the admin
+    // scheduler retries rows where it's null, up to 3 attempts.
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    notifyAttempts: integer('notify_attempts').default(0).notNull(),
   },
   (table) => [
     index('site_submissions_created_at_idx').on(table.createdAt.desc().nullsFirst()),
     index('site_submissions_site_id_idx').on(table.siteId),
+    index('site_submissions_unnotified_idx')
+      .on(table.createdAt)
+      .where(sql`(notified_at IS NULL)`),
     foreignKey({
       columns: [table.siteId],
       foreignColumns: [sites.id],
