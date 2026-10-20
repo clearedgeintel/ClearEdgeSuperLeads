@@ -9,8 +9,13 @@ import {
   integer,
   boolean,
   decimal,
+  uuid,
+  foreignKey,
+  unique,
+  check,
 } from 'drizzle-orm/pg-core';
-import { createInsertSchema } from 'drizzle-zod';
+import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
+import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 // ============================================================
@@ -124,8 +129,9 @@ export const leads = pgTable(
     language: varchar('language').default('en'),
 
     // Instant Site demo (v2) — generated one-page demo site for this lead.
-    demoSiteSlug: varchar('demo_site_slug'),
-    demoSiteUrl: varchar('demo_site_url'),
+    // text, not varchar: matches the live columns (created by Instant Site).
+    demoSiteSlug: text('demo_site_slug'),
+    demoSiteUrl: text('demo_site_url'),
 
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -575,6 +581,126 @@ export const appConfig = pgTable(
   (table) => [uniqueIndex('uniq_app_config_key').on(table.workspaceId, table.key)]
 );
 
+export type SitePhotoRole = 'hero' | 'gallery';
+export interface SitePhoto {
+  url: string;
+  alt: string;
+  role: SitePhotoRole;
+}
+
+// ============================================================
+// sites — Instant Site one-page sites (demo + live)
+//   Created by Instant Site's SQL migrations 001–005 and adopted here
+//   column for column (verified against `drizzle-kit pull`). Constraint
+//   and index names are the live ones, so Drizzle never recreates them.
+//   No updated_at trigger exists: writers must set updatedAt themselves.
+//   RLS is enabled with no policies (Supabase default); the app connects as
+//   the table owner, which bypasses it.
+// ============================================================
+export const sites = pgTable(
+  'sites',
+  {
+    id: uuid('id').defaultRandom().primaryKey().notNull(),
+    slug: text('slug').notNull(),
+    businessName: text('business_name').notNull(),
+    mapsUrl: text('maps_url'),
+    theme: text('theme').default('slate').notNull(),
+    status: text('status').default('draft').notNull(), // draft | sent | live
+    data: jsonb('data').notNull(), // BusinessData (shared/sites.ts, Phase 2)
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    workspaceId: text('workspace_id'),
+    leadId: text('lead_id'),
+    createdBy: text('created_by'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+
+    // Added by migrations/0001_sites_additive_columns.sql (Phase 1).
+    customDomain: text('custom_domain'), // lowercased, no leading www.
+    photos: jsonb('photos').$type<SitePhoto[]>().default(sql`'[]'::jsonb`).notNull(),
+    notifyEmail: text('notify_email'),
+    notifyPhone: text('notify_phone'), // reserved for SMS
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    clientId: varchar('client_id'), // FK to clients added in Phase 5
+  },
+  (table) => [
+    // Both expressions are written exactly as Postgres stores them (pg_get_expr):
+    // drizzle-kit compares the text literally, so any other spelling makes a
+    // push drop and recreate them. `!~~` is NOT LIKE: lowercase, no leading www.
+    uniqueIndex('sites_custom_domain_key')
+      .on(table.customDomain)
+      .where(sql`(custom_domain IS NOT NULL)`),
+    check(
+      'sites_custom_domain_normalized',
+      sql`(custom_domain IS NULL) OR ((custom_domain = lower(custom_domain)) AND (custom_domain !~~ 'www.%'::text))`
+    ),
+    index('sites_created_at_idx').on(table.createdAt.desc().nullsFirst()),
+    index('sites_deleted_at_idx').on(table.deletedAt),
+    index('sites_lead_id_idx').on(table.leadId),
+    index('sites_workspace_id_idx').on(table.workspaceId),
+    foreignKey({
+      columns: [table.leadId],
+      foreignColumns: [leads.id],
+      name: 'sites_lead_id_fkey',
+    }).onDelete('set null'),
+    foreignKey({
+      columns: [table.workspaceId],
+      foreignColumns: [workspaces.id],
+      name: 'sites_workspace_id_fkey',
+    }).onDelete('set null'),
+    unique('sites_slug_key').on(table.slug),
+  ]
+).enableRLS();
+
+// ============================================================
+// site_submissions — quote-form submissions from a site
+// ============================================================
+export const siteSubmissions = pgTable(
+  'site_submissions',
+  {
+    id: uuid('id').defaultRandom().primaryKey().notNull(),
+    siteId: uuid('site_id').notNull(),
+    leadId: text('lead_id'),
+    workspaceId: text('workspace_id'),
+    name: text('name'),
+    email: text('email'),
+    phone: text('phone'),
+    message: text('message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('site_submissions_created_at_idx').on(table.createdAt.desc().nullsFirst()),
+    index('site_submissions_site_id_idx').on(table.siteId),
+    foreignKey({
+      columns: [table.siteId],
+      foreignColumns: [sites.id],
+      name: 'site_submissions_site_id_fkey',
+    }).onDelete('cascade'),
+  ]
+).enableRLS();
+
+// ============================================================
+// site_views — page views recorded by the view pixel
+// ============================================================
+export const siteViews = pgTable(
+  'site_views',
+  {
+    id: uuid('id').defaultRandom().primaryKey().notNull(),
+    siteId: uuid('site_id').notNull(),
+    referrer: text('referrer'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('site_views_created_at_idx').on(table.createdAt.desc().nullsFirst()),
+    index('site_views_site_id_idx').on(table.siteId),
+    foreignKey({
+      columns: [table.siteId],
+      foreignColumns: [sites.id],
+      name: 'site_views_site_id_fkey',
+    }).onDelete('cascade'),
+  ]
+).enableRLS();
+
 // ============================================================
 // Insert schemas (zod validators via drizzle-zod)
 // ============================================================
@@ -640,6 +766,40 @@ export const insertAuditLogSchema = createInsertSchema(auditLog).omit({
   createdAt: true,
 });
 
+export const sitePhotoSchema = z.object({
+  url: z.string().url(),
+  alt: z.string(),
+  role: z.enum(['hero', 'gallery']),
+});
+
+export const SITE_STATUSES = ['draft', 'sent', 'live'] as const;
+export type SiteStatus = (typeof SITE_STATUSES)[number];
+
+// A schema override replaces drizzle-zod's own column schema, optionality
+// included, so restate .optional() — the column defaults to '[]'.
+export const insertSiteSchema = createInsertSchema(sites, {
+  photos: z.array(sitePhotoSchema).optional(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const selectSiteSchema = createSelectSchema(sites, {
+  photos: z.array(sitePhotoSchema),
+});
+
+export const insertSiteSubmissionSchema = createInsertSchema(siteSubmissions).omit({
+  id: true,
+  createdAt: true,
+});
+export const selectSiteSubmissionSchema = createSelectSchema(siteSubmissions);
+
+export const insertSiteViewSchema = createInsertSchema(siteViews).omit({
+  id: true,
+  createdAt: true,
+});
+export const selectSiteViewSchema = createSelectSchema(siteViews);
+
 // ============================================================
 // Type exports
 // ============================================================
@@ -695,3 +855,12 @@ export type InsertApiUsageLogEntry = typeof apiUsageLog.$inferInsert;
 
 export type VocInsight = typeof vocInsights.$inferSelect;
 export type InsertVocInsight = typeof vocInsights.$inferInsert;
+
+export type Site = typeof sites.$inferSelect;
+export type InsertSite = z.infer<typeof insertSiteSchema>;
+
+export type SiteSubmission = typeof siteSubmissions.$inferSelect;
+export type InsertSiteSubmission = z.infer<typeof insertSiteSubmissionSchema>;
+
+export type SiteView = typeof siteViews.$inferSelect;
+export type InsertSiteView = z.infer<typeof insertSiteViewSchema>;
