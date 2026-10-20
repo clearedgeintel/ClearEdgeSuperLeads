@@ -16,6 +16,11 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import { sql } from 'drizzle-orm';
+import { sitePhotoSchema, type BusinessData, type SitePhoto } from './sites';
+
+// Site domain types live in shared/sites.ts; re-exported for schema consumers.
+export { sitePhotoSchema, SITE_STATUSES } from './sites';
+export type { SitePhoto, SitePhotoRole, SiteStatus } from './sites';
 import { z } from 'zod';
 
 // ============================================================
@@ -581,13 +586,6 @@ export const appConfig = pgTable(
   (table) => [uniqueIndex('uniq_app_config_key').on(table.workspaceId, table.key)]
 );
 
-export type SitePhotoRole = 'hero' | 'gallery';
-export interface SitePhoto {
-  url: string;
-  alt: string;
-  role: SitePhotoRole;
-}
-
 // ============================================================
 // sites — Instant Site one-page sites (demo + live)
 //   Created by Instant Site's SQL migrations 001–005 and adopted here
@@ -606,7 +604,7 @@ export const sites = pgTable(
     mapsUrl: text('maps_url'),
     theme: text('theme').default('slate').notNull(),
     status: text('status').default('draft').notNull(), // draft | sent | live
-    data: jsonb('data').notNull(), // BusinessData (shared/sites.ts, Phase 2)
+    data: jsonb('data').$type<BusinessData>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     workspaceId: text('workspace_id'),
@@ -766,15 +764,6 @@ export const insertAuditLogSchema = createInsertSchema(auditLog).omit({
   createdAt: true,
 });
 
-export const sitePhotoSchema = z.object({
-  url: z.string().url(),
-  alt: z.string(),
-  role: z.enum(['hero', 'gallery']),
-});
-
-export const SITE_STATUSES = ['draft', 'sent', 'live'] as const;
-export type SiteStatus = (typeof SITE_STATUSES)[number];
-
 // A schema override replaces drizzle-zod's own column schema, optionality
 // included, so restate .optional() — the column defaults to '[]'.
 export const insertSiteSchema = createInsertSchema(sites, {
@@ -856,11 +845,11 @@ export type InsertApiUsageLogEntry = typeof apiUsageLog.$inferInsert;
 export type VocInsight = typeof vocInsights.$inferSelect;
 export type InsertVocInsight = typeof vocInsights.$inferInsert;
 
-export type Site = typeof sites.$inferSelect;
+export type SiteRow = typeof sites.$inferSelect;
 export type InsertSite = z.infer<typeof insertSiteSchema>;
 
-export type SiteSubmission = typeof siteSubmissions.$inferSelect;
+export type SiteSubmissionRow = typeof siteSubmissions.$inferSelect;
 export type InsertSiteSubmission = z.infer<typeof insertSiteSubmissionSchema>;
 
-export type SiteView = typeof siteViews.$inferSelect;
+export type SiteViewRow = typeof siteViews.$inferSelect;
 export type InsertSiteView = z.infer<typeof insertSiteViewSchema>;

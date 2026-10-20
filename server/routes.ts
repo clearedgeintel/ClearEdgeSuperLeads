@@ -50,6 +50,10 @@ import { aiQueue } from "./lib/backgroundQueue";
 import * as nodeCrypto from "node:crypto";
 import { verifyUnsubscribeToken } from "./lib/unsubscribe";
 import { sendTestWebhook, deliverWebhookEvent } from "./services/webhookDeliveryService";
+import { createSitesRouter } from "./sites/routes";
+import { siteRepository, siteGenerator } from "./sites/service";
+import { publicSiteBaseUrl } from "./sites/urls";
+import { isPhotoStorageConfigured, uploadSitePhoto } from "./sites/photos";
 
 /**
  * Apply an accepted invitation: upsert the user into the invited workspace +
@@ -264,6 +268,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // run before the Google OAuth + unsubscribe public routes. Phase 9
   // promotes it from "informational" to "injected on every request".
   app.use(requireWorkspace);
+
+  // Sites (ported from Instant Site). Workspace-scoped admin API; the public
+  // site pages are served by server/public.ts, not this app.
+  app.use(
+    '/api/sites',
+    requireAuth,
+    createSitesRouter({
+      repo: siteRepository,
+      generator: siteGenerator,
+      publicBaseUrl: publicSiteBaseUrl,
+      photos: { isConfigured: isPhotoStorageConfigured, upload: uploadSitePhoto },
+    }),
+  );
 
   // Phase 11 — SSE endpoint. Authenticated, workspace-scoped, per-user
   // connection. Sends heartbeat pings every 30s to keep the connection
@@ -567,7 +584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/leads/:id/generate-demo', requireAuth, async (req, res) => {
     try {
       if (!instantSiteService.isConfigured()) {
-        return res.status(400).json({ message: "Instant Site is not configured. Set INSTANT_SITE_BASE_URL." });
+        return res.status(400).json({ message: "Demo sites are not configured. Set PUBLIC_SITE_BASE_URL." });
       }
       const lead = await storage.getLead(req.params.id);
       if (!lead) {

@@ -6,6 +6,7 @@ import { Mail, Download, AlertTriangle, Clock, Info, Star, RefreshCw, Globe, Map
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { OPEN_SITE_EVENT, type OpenSiteDetail } from "@/components/sites/api";
 
 interface LeadModalProps {
   lead: any;
@@ -110,11 +111,16 @@ export default function LeadModal({ lead, open, onClose, onOutreach, onEnrich, o
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sites'] });
       toast({
-        title: 'Demo site generated',
-        description: 'A hosted demo site is ready for this lead.',
+        title: 'Demo site ready',
+        description: 'Opening it in the Sites tab.',
       });
-      if (data?.url) window.open(data.url, '_blank', 'noopener');
+      if (data?.slug) {
+        window.dispatchEvent(
+          new CustomEvent<OpenSiteDetail>(OPEN_SITE_EVENT, { detail: { slug: data.slug } }),
+        );
+      }
     },
     onError: (err: Error) => {
       toast({ title: 'Demo generation failed', description: err.message, variant: 'destructive' });

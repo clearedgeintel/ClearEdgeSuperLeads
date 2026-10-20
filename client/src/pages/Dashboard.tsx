@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -16,6 +16,8 @@ import EmailOutreach from "@/components/EmailOutreach";
 import Analytics from "@/components/Analytics";
 import Reports from "@/components/Reports";
 import Settings from "@/components/Settings";
+import SitesTab from "@/components/sites/SitesTab";
+import { OPEN_SITE_EVENT, type OpenSiteDetail } from "@/components/sites/api";
 import NotificationBell from "@/components/NotificationBell";
 import Onboarding from "@/components/Onboarding";
 
@@ -33,6 +35,20 @@ export default function Dashboard() {
   const [apiStatus, setApiStatus] = useState<any>({});
 
   const [showOnboarding, setShowOnboarding] = useState(true);
+  const [openSiteSlug, setOpenSiteSlug] = useState<string | null>(null);
+  const clearOpenSite = useCallback(() => setOpenSiteSlug(null), []);
+
+  // Other tabs (e.g. "Generate demo site" on a lead) ask to open a site here.
+  useEffect(() => {
+    const onOpenSite = (e: Event) => {
+      const { slug } = (e as CustomEvent<OpenSiteDetail>).detail ?? {};
+      if (!slug) return;
+      setOpenSiteSlug(slug);
+      setActiveTab('sites');
+    };
+    window.addEventListener(OPEN_SITE_EVENT, onOpenSite);
+    return () => window.removeEventListener(OPEN_SITE_EVENT, onOpenSite);
+  }, []);
 
   // Phase 11 — SSE connection for live updates.
   useSSE();
@@ -99,6 +115,7 @@ export default function Dashboard() {
     { id: 'campaigns', label: 'Campaigns', icon: 'megaphone' },
     { id: 'sendQueue', label: 'Send Queue', icon: 'list-check' },
     { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+    { id: 'sites', label: 'Sites', icon: 'globe' },
     { id: 'profileManagement', label: 'GBP Profiles', icon: 'store' },
     { id: 'emailOutreach', label: 'Email Outreach', icon: 'envelope' },
     { id: 'analytics', label: 'Analytics', icon: 'chart-bar' },
@@ -223,6 +240,7 @@ export default function Dashboard() {
           {activeTab === 'campaigns' && <CampaignBuilder />}
           {activeTab === 'sendQueue' && <SendQueue />}
           {activeTab === 'inbox' && <Inbox />}
+          {activeTab === 'sites' && <SitesTab openSlug={openSiteSlug} onOpened={clearOpenSite} />}
           {activeTab === 'profileManagement' && <ProfileManagement />}
           {activeTab === 'emailOutreach' && <EmailOutreach />}
           {activeTab === 'analytics' && <Analytics />}

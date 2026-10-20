@@ -1,64 +1,55 @@
-// Instant Site integration — generates a hosted one-page demo site for a lead
-// by calling the ClearEdge Instant Site service (POST /api/generate { leadId }).
-// Both apps share this Postgres DB, so Instant Site reads the lead by id and
-// writes a `sites` row scoped to the lead/workspace; we persist the returned
-// slug/url back onto the lead for the {{demo_url}} token and the lead UI.
+// Instant Site integration — generates a hosted one-page demo site for a lead.
+// Generation runs in-process (server/sites); this class keeps the interface
+// that queueGenerationService and the generate-demo route already use. The
+// slug/url are persisted back onto the lead for the {{demo_url}} token and the
+// lead UI.
 
 import { storage } from '../storage';
 import type { Lead } from '@shared/schema';
-
-interface GenerateResponse {
-  id: string;
-  slug: string;
-  url: string;
-  data?: unknown;
-}
+import { siteGenerator } from '../sites/service';
+import { publicSiteBaseUrl, publicSiteUrl } from '../sites/urls';
 
 export class InstantSiteService {
-  private baseUrl: string;
-
-  constructor() {
-    this.baseUrl = (process.env.INSTANT_SITE_BASE_URL || '').replace(/\/+$/, '');
-  }
-
+  /**
+   * Generation itself always works for a lead (copy falls back to a template
+   * without ANTHROPIC_API_KEY). What it can't do without config is produce a
+   * link that resolves, so this checks for PUBLIC_SITE_BASE_URL.
+   */
   isConfigured(): boolean {
-    return !!this.baseUrl;
+    return !!publicSiteBaseUrl();
   }
 
   /**
-   * Generate a fresh demo site for a lead and persist slug/url on the lead.
-   * Throws on failure (used by the explicit "Generate demo site" button).
+   * Return the lead's demo site, generating one if it has none (or always,
+   * with `force`), and persist slug/url on the lead. Throws on failure (used by
+   * the explicit "Generate demo site" button).
    */
-  async generateForLead(leadId: string): Promise<{ slug: string; url: string }> {
+  async generateForLead(
+    leadId: string,
+    opts: { force?: boolean } = {}
+  ): Promise<{ slug: string; url: string }> {
     if (!this.isConfigured()) {
-      throw new Error('Instant Site is not configured. Set INSTANT_SITE_BASE_URL.');
+      throw new Error('Demo sites are not configured. Set PUBLIC_SITE_BASE_URL.');
     }
-    const res = await fetch(`${this.baseUrl}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId }),
+    const lead = await storage.getLead(leadId);
+    if (!lead) throw new Error('Lead not found');
+
+    const { site } = await siteGenerator.fromLead({
+      leadId: lead.id,
+      workspaceId: lead.workspaceId ?? null,
+      force: opts.force,
     });
-    if (!res.ok) {
-      let message = `Instant Site request failed (${res.status})`;
-      try {
-        const body = (await res.json()) as { error?: string };
-        if (body?.error) message = body.error;
-      } catch {
-        /* keep default */
-      }
-      throw new Error(message);
-    }
-    const body = (await res.json()) as GenerateResponse;
-    await storage.updateLead(leadId, {
-      demoSiteSlug: body.slug,
-      demoSiteUrl: body.url,
+    const url = publicSiteUrl(site.slug);
+    await storage.updateLead(lead.id, {
+      demoSiteSlug: site.slug,
+      demoSiteUrl: url,
     } as Partial<Lead>);
-    return { slug: body.slug, url: body.url };
+    return { slug: site.slug, url };
   }
 
   /**
    * Return the lead's demo URL, generating one if missing. Never throws — the
-   * send path must not break if Instant Site is down or unconfigured.
+   * send path must not break if generation fails or isn't configured.
    */
   async ensureDemoForLead(lead: Lead): Promise<string | null> {
     if (lead.demoSiteUrl) return lead.demoSiteUrl;
