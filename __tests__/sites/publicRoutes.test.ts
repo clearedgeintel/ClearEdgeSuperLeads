@@ -24,6 +24,7 @@ function makeSite(o: Partial<Site> = {}): Site {
     createdBy: null,
     photos: [],
     customDomain: null,
+    customDomainWww: false,
     notifyEmail: 'owner@example.com',
     publishedAt: null,
     createdAt: '2026-10-01T00:00:00.000Z',
@@ -259,9 +260,9 @@ describe('view pixel', () => {
 describe('custom domain host', () => {
   const live = () => makeSite({ status: 'live', customDomain: 'acme-roofing.com' });
 
-  test('serves the site at / on the domain and www.', async () => {
+  test('serves the site at / on its canonical host, in any letter case', async () => {
     const { app } = setup([live()]);
-    for (const host of ['acme-roofing.com', 'www.acme-roofing.com', 'ACME-Roofing.com']) {
+    for (const host of ['acme-roofing.com', 'ACME-Roofing.com']) {
       const res = await request(app).get('/').set('Host', host).expect(200);
       expect(res.text).toContain('<link rel="canonical" href="https://acme-roofing.com/" />');
       expect(res.text).toContain('action="/contact"');
@@ -297,5 +298,45 @@ describe('custom domain host', () => {
     expect(repo.recordView).toHaveBeenCalledTimes(1);
     await request(app).get('/s/acme').set('Host', 'acme-roofing.com').expect(404);
     await request(app).get('/admin').set('Host', 'acme-roofing.com').expect(404);
+  });
+});
+
+describe('canonical host (www)', () => {
+  const wwwSite = () => makeSite({ status: 'live', customDomain: 'acme-roofing.com', customDomainWww: true });
+
+  test('www serves the site; the bare domain 301s to www, keeping the path', async () => {
+    const { app } = setup([wwwSite()]);
+    const ok = await request(app).get('/').set('Host', 'www.acme-roofing.com').expect(200);
+    expect(ok.text).toContain('<link rel="canonical" href="https://www.acme-roofing.com/" />');
+    const apex = await request(app).get('/sitemap.xml?x=1').set('Host', 'acme-roofing.com').expect(301);
+    expect(apex.headers.location).toBe('https://www.acme-roofing.com/sitemap.xml?x=1');
+  });
+
+  test('robots, sitemap and the /s/:slug redirect all use www', async () => {
+    const { app } = setup([wwwSite()]);
+    const robots = await request(app).get('/robots.txt').set('Host', 'www.acme-roofing.com').expect(200);
+    expect(robots.text).toContain('Sitemap: https://www.acme-roofing.com/sitemap.xml');
+    const map = await request(app).get('/sitemap.xml').set('Host', 'www.acme-roofing.com').expect(200);
+    expect(map.text).toContain('<loc>https://www.acme-roofing.com/</loc>');
+    const slug = await onBase(request(app).get('/s/acme')).expect(301);
+    expect(slug.headers.location).toBe('https://www.acme-roofing.com/');
+  });
+
+  test('without www, www redirects to the bare domain', async () => {
+    const { app } = setup([makeSite({ status: 'live', customDomain: 'acme-roofing.com', customDomainWww: false })]);
+    const res = await request(app).get('/').set('Host', 'www.acme-roofing.com').expect(301);
+    expect(res.headers.location).toBe('https://acme-roofing.com/');
+  });
+
+  test('the form still posts on either host (no redirect for POST)', async () => {
+    const { app, repo } = setup([wwwSite()]);
+    await request(app).post('/contact').set('Host', 'acme-roofing.com').type('form').send({ name: 'J', phone: '1' }).expect(303);
+    expect(repo.createSubmission).toHaveBeenCalledTimes(1);
+  });
+
+  test('healthz answers on the domain (used by the domain check)', async () => {
+    const { app } = setup([wwwSite()]);
+    const res = await request(app).get('/healthz').set('Host', 'www.acme-roofing.com').expect(200);
+    expect(res.body.service).toBe('clearedge-public-sites');
   });
 });

@@ -16,3 +16,4 @@ Instant Site service uses this database too, so every file here must be
 |---|---|---|---|
 | `0001_sites_additive_columns.sql` | 1 | `sites`: `custom_domain` (unique, normalized), `photos`, `notify_email`, `notify_phone`, `published_at`, `client_id` | 2026-10-18 (Supabase `apply_migration`, name `sites_additive_columns`) |
 | `0002_site_submission_notify.sql` | 3 | `site_submissions`: `notified_at`, `notify_attempts`, partial index on un-notified rows | 2026-10-27 (Supabase `apply_migration`, name `site_submission_notify`) |
+| `0003_sites_custom_domain_www.sql` | 4 | `sites.custom_domain_www`: serve at www.<domain> | not yet |

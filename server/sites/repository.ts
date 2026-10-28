@@ -75,6 +75,7 @@ export function rowToSite(row: SiteRow): Site {
     createdBy: row.createdBy ?? null,
     photos: Array.isArray(row.photos) ? row.photos : [],
     customDomain: row.customDomain ?? null,
+    customDomainWww: row.customDomainWww ?? false,
     notifyEmail: row.notifyEmail ?? null,
     publishedAt: iso(row.publishedAt),
     createdAt: iso(row.createdAt)!,
@@ -111,6 +112,7 @@ export interface SitePatch {
   photos?: SitePhoto[];
   notifyEmail?: string | null;
   customDomain?: string | null;
+  customDomainWww?: boolean;
 }
 
 /** A submission whose owner email hasn't gone out, with the site it belongs to. */
@@ -240,6 +242,7 @@ export function createSiteRepository(db: SitesDb) {
       if (patch.photos) set.photos = patch.photos;
       if (patch.notifyEmail !== undefined) set.notifyEmail = patch.notifyEmail;
       if (patch.customDomain !== undefined) set.customDomain = patch.customDomain;
+      if (patch.customDomainWww !== undefined) set.customDomainWww = patch.customDomainWww;
       try {
         const [row] = await db.update(sites).set(set).where(inWorkspace(id, workspaceId)).returning();
         return row ? rowToSite(row) : null;

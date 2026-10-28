@@ -37,6 +37,7 @@ describe('sites table mirrors production', () => {
         'deleted_at',
         // Phase 1 additive columns
         'custom_domain',
+        'custom_domain_www',
         'photos',
         'notify_email',
         'notify_phone',

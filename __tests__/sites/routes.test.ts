@@ -28,6 +28,7 @@ function makeSite(overrides: Partial<Site> = {}): Site {
     createdBy: null,
     photos: [],
     customDomain: null,
+    customDomainWww: false,
     notifyEmail: null,
     publishedAt: null,
     createdAt: '2026-10-01T00:00:00.000Z',
@@ -63,6 +64,7 @@ function setup(opts: { workspace?: boolean; role?: string; site?: Site | null; b
     generator: generator as unknown as SiteGenerator,
     publicBaseUrl: () => (opts.base === undefined ? 'https://sites.example.com' : opts.base),
     previewSecret: () => 'test-preview-secret',
+    checkDomain: jest.fn().mockResolvedValue({ ready: true }),
     photos,
   };
 
@@ -74,7 +76,7 @@ function setup(opts: { workspace?: boolean; role?: string; site?: Site | null; b
     next();
   });
   app.use('/api/sites', createSitesRouter(deps));
-  return { app, repo, generator, photos };
+  return { app, repo, generator, photos, deps };
 }
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00]);
@@ -293,4 +295,36 @@ test('preview renders HTML without the form or the pixel', async () => {
   expect(res.text).toMatch(/^<!doctype html>/i);
   expect(res.text).not.toContain('pixel.gif');
   expect(res.text).not.toContain('<form');
+});
+
+describe('custom domain', () => {
+  test('PATCH takes the www flag as a boolean only', async () => {
+    const { app, repo } = setup();
+    await request(app)
+      .patch(`/api/sites/${SITE_ID}`)
+      .send({ customDomain: 'www.Acme-Roofing.com', customDomainWww: true })
+      .expect(200);
+    expect(repo.updateForWorkspace).toHaveBeenCalledWith(SITE_ID, 'ws-a', {
+      customDomain: 'acme-roofing.com',
+      customDomainWww: true,
+    });
+    await request(app).patch(`/api/sites/${SITE_ID}`).send({ customDomainWww: 'yes' }).expect(400);
+  });
+
+  test('domain-check needs a domain, and is scoped to the workspace', async () => {
+    const noDomain = setup();
+    await request(noDomain.app).get(`/api/sites/${SITE_ID}/domain-check`).expect(422);
+    expect(noDomain.deps.checkDomain).not.toHaveBeenCalled();
+
+    const missing = setup({ site: null });
+    await request(missing.app).get(`/api/sites/${SITE_ID}/domain-check`).expect(404);
+
+    const withDomain = setup({ site: makeSite({ customDomain: 'acme-roofing.com', customDomainWww: true }) });
+    const res = await request(withDomain.app).get(`/api/sites/${SITE_ID}/domain-check`).expect(200);
+    expect(res.body).toEqual({ ready: true });
+    expect(withDomain.repo.getForWorkspace).toHaveBeenCalledWith(SITE_ID, 'ws-a');
+    expect(withDomain.deps.checkDomain).toHaveBeenCalledWith(
+      expect.objectContaining({ customDomain: 'acme-roofing.com', customDomainWww: true })
+    );
+  });
 });

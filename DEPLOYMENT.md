@@ -44,7 +44,12 @@ runaway job can't take a client's website offline.
 
    Do **not** give it `SESSION_SECRET`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY` or outreach
    credentials.
-4. Add `PUBLIC_SITE_BASE_URL` and `SITE_PREVIEW_SECRET` to the `app` service too.
+4. Add `PUBLIC_SITE_BASE_URL` and `SITE_PREVIEW_SECRET` to the `app` service too, and optionally
+   `PUBLIC_SITE_RAILWAY_HOST` (the public service's `*.up.railway.app` domain) for the editor's
+   custom-domain check.
+
+Client custom domains are added to the **public** service by hand; see
+[docs/custom-domains.md](docs/custom-domains.md) (including plan limits on custom domains).
 
 Unknown hosts get a 404 from `public`. Hosts listed in `PUBLIC_SITE_BASE_URL` / `PUBLIC_SITE_EXTRA_HOSTS`
 serve `/s/:slug`; any other host must be a live site's custom domain.

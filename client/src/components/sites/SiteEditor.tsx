@@ -31,6 +31,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { publicSiteHref, sitesRequest, SitesApiError, type SitesConfig } from './api';
 import PhotoManager from './PhotoManager';
+import DomainSetup from './DomainSetup';
 
 const THEME_OPTIONS: { value: Theme; label: string }[] = [
   { value: 'slate', label: 'Slate (dark, bold)' },
@@ -64,6 +65,7 @@ export default function SiteEditor({ id, onBack }: { id: string; onBack: () => v
   const [theme, setTheme] = useState<Theme>('slate');
   const [notifyEmail, setNotifyEmail] = useState('');
   const [customDomain, setCustomDomain] = useState('');
+  const [useWww, setUseWww] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -76,7 +78,8 @@ export default function SiteEditor({ id, onBack }: { id: string; onBack: () => v
     setData(s.data);
     setTheme(s.theme);
     setNotifyEmail(s.notifyEmail ?? '');
-    setCustomDomain(s.customDomain ?? '');
+    setCustomDomain(s.customDomain ? (s.customDomainWww ? `www.${s.customDomain}` : s.customDomain) : '');
+    setUseWww(s.customDomain ? s.customDomainWww : true);
     setDirty(false);
   }
 
@@ -116,6 +119,7 @@ export default function SiteEditor({ id, onBack }: { id: string; onBack: () => v
         theme,
         notifyEmail: notifyEmail.trim() || null,
         customDomain: customDomain.trim() || null,
+        customDomainWww: useWww,
       });
       applyServerSite(updated);
       load(updated);
@@ -308,16 +312,38 @@ export default function SiteEditor({ id, onBack }: { id: string; onBack: () => v
                 value={customDomain}
                 placeholder="example.com"
                 onChange={(e) => {
-                  setCustomDomain(e.target.value);
+                  const v = e.target.value;
+                  setCustomDomain(v);
+                  if (/^\s*(https?:\/\/)?www\./i.test(v)) setUseWww(true);
                   touch();
                 }}
               />
             </Field>
-            <p className="text-xs text-gray-500 flex gap-1.5">
-              <Globe className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              Stored without “www.”. DNS setup instructions for the domain will appear here once
-              custom-domain hosting is switched on.
-            </p>
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={useWww}
+                onChange={(e) => {
+                  setUseWww(e.target.checked);
+                  touch();
+                }}
+              />
+              <span>
+                Use <strong>www</strong> as the main address (recommended). Most DNS providers can’t point a
+                bare domain at the site server, so the bare domain forwards to www.
+              </span>
+            </label>
+            {site.customDomain && !dirty ? (
+              <DomainSetup site={site} />
+            ) : (
+              customDomain.trim() && (
+                <p className="text-xs text-gray-500 flex gap-1.5">
+                  <Globe className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  Save to see the DNS setup steps for this domain.
+                </p>
+              )
+            )}
           </Section>
 
           <Section title="Photos">

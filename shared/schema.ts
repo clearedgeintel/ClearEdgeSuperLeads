@@ -614,6 +614,8 @@ export const sites = pgTable(
 
     // Added by migrations/0001_sites_additive_columns.sql (Phase 1).
     customDomain: text('custom_domain'), // lowercased, no leading www.
+    // Added by migrations/0003_sites_custom_domain_www.sql (Phase 4).
+    customDomainWww: boolean('custom_domain_www').default(false).notNull(),
     photos: jsonb('photos').$type<SitePhoto[]>().default(sql`'[]'::jsonb`).notNull(),
     notifyEmail: text('notify_email'),
     notifyPhone: text('notify_phone'), // reserved for SMS
