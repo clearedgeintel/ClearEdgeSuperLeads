@@ -54,6 +54,7 @@ import { createSitesRouter } from "./sites/routes";
 import { siteRepository, siteGenerator } from "./sites/service";
 import { publicSiteBaseUrl } from "./sites/urls";
 import { isPhotoStorageConfigured, uploadSitePhoto } from "./sites/photos";
+import { previewSecret } from "./sites/previewToken";
 
 /**
  * Apply an accepted invitation: upsert the user into the invited workspace +
@@ -278,6 +279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       repo: siteRepository,
       generator: siteGenerator,
       publicBaseUrl: publicSiteBaseUrl,
+      previewSecret: () => previewSecret(),
       photos: { isConfigured: isPhotoStorageConfigured, upload: uploadSitePhoto },
     }),
   );

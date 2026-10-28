@@ -227,6 +227,7 @@ export class EmailService {
     subject: string,
     html: string,
     text?: string,
+    opts: { replyTo?: string } = {},
   ): Promise<{ messageId: string; success: boolean; provider: Provider }> {
     const textBody = text ?? html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     // Prefer a dedicated transactional from-address (point it at a subdomain
@@ -240,6 +241,7 @@ export class EmailService {
       text: textBody,
       fromEmail: process.env.RESEND_TRANSACTIONAL_FROM_EMAIL || process.env.RESEND_FROM_EMAIL,
       tags: [{ name: 'source', value: 'clearedge_transactional' }],
+      replyTo: opts.replyTo,
     });
   }
 
@@ -257,6 +259,7 @@ export class EmailService {
     fromEmail?: string;
     headers?: Record<string, string>;
     tags?: { name: string; value: string }[];
+    replyTo?: string;
   }): Promise<{ messageId: string; success: boolean; provider: Provider }> {
     if (this.provider === 'resend' && this.resend) {
       if (!opts.fromEmail) {
@@ -270,6 +273,7 @@ export class EmailService {
         text: opts.text,
         ...(opts.headers ? { headers: opts.headers } : {}),
         ...(opts.tags ? { tags: opts.tags } : {}),
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
       });
       if (error) {
         logger.error({ err: error }, '[email] resend send failed');
@@ -292,6 +296,7 @@ export class EmailService {
         html: opts.html,
         text: opts.text,
         ...(opts.headers ? { headers: opts.headers } : {}),
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
       });
       return { messageId: info.messageId, success: true, provider: 'gmail' };
     } catch (error: any) {

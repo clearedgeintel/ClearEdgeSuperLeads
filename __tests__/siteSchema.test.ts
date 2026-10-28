@@ -80,7 +80,7 @@ describe.each([
   [
     'site_submissions',
     siteSubmissions,
-    ['id', 'site_id', 'lead_id', 'workspace_id', 'name', 'email', 'phone', 'message', 'created_at'],
+    ['id', 'site_id', 'lead_id', 'workspace_id', 'name', 'email', 'phone', 'message', 'created_at', 'notified_at', 'notify_attempts'],
   ],
   ['site_views', siteViews, ['id', 'site_id', 'referrer', 'user_agent', 'created_at']],
 ] as const)('%s mirrors production', (name, table, columns) => {

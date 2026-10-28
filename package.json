@@ -9,8 +9,11 @@
   },
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx --env-file=.env server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "vite build && esbuild server/index.ts server/public.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build:public": "esbuild server/public.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "cross-env NODE_ENV=production node dist/index.js",
+    "start:public": "cross-env NODE_ENV=production node dist/public.js",
+    "dev:public": "cross-env NODE_ENV=development PORT=5100 tsx --env-file=.env server/public.ts",
     "check": "tsc",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",

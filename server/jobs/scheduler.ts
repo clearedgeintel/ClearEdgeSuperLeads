@@ -20,6 +20,8 @@ import { notifyJobFailure, recordJobSuccess } from './alerting';
 import { leads } from '@shared/schema';
 import { and, lte, or, eq, isNull } from 'drizzle-orm';
 import { db } from '../db';
+import { siteNotifier, siteRepository } from '../sites/service';
+import { retryPendingNotifications } from '../sites/notify';
 
 type JobFn = () => Promise<void>;
 
@@ -83,6 +85,15 @@ export function startScheduler(): void {
     void runJob('recoverStuckAnalyzing', async () => {
       const recovered = await recoverStuckAnalyzing();
       if (recovered > 0) logger.info({ recovered }, 'recovered stuck analyzing leads');
+    });
+  });
+
+  // Site quote requests — retry owner emails that failed (or were skipped while
+  // email wasn't configured). Rows older than 5 minutes, up to 3 attempts.
+  cron.schedule('*/5 * * * *', () => {
+    void runJob('siteNotifyRetry', async () => {
+      const counts = await retryPendingNotifications(siteRepository, siteNotifier);
+      if (counts.sent || counts.failed) logger.info({ counts }, 'site notification retry');
     });
   });
 
