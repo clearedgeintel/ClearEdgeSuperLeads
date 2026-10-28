@@ -48,7 +48,9 @@ export interface Site {
   leadId: string | null;
   createdBy: string | null;
   photos: SitePhoto[];
-  customDomain: string | null;
+  customDomain: string | null; // stored without "www."
+  /** Serve the site at www.<customDomain> (canonical), with the apex redirecting to it. */
+  customDomainWww: boolean;
   notifyEmail: string | null;
   publishedAt: string | null;
   createdAt: string;
@@ -81,6 +83,15 @@ export interface GenerateResponse {
   data: BusinessData;
   url: string | null; // null until PUBLIC_SITE_BASE_URL is set
   reused: boolean;
+}
+
+/**
+ * The host a live site is served and indexed at: www.<domain> when the site
+ * uses www, else the bare domain. Null when the site has no custom domain.
+ */
+export function siteCanonicalHost(site: Pick<Site, 'customDomain' | 'customDomainWww'>): string | null {
+  if (!site.customDomain) return null;
+  return site.customDomainWww ? `www.${site.customDomain}` : site.customDomain;
 }
 
 // Sentinel author for the labeled sample testimonials.

@@ -7,6 +7,7 @@ import type { SiteRepository } from './repository';
 import { createNotifier, transactionalEmailConfigured } from './notify';
 import { publicSiteBaseUrl } from './urls';
 import { isValidCustomDomain } from './domain';
+import { siteCanonicalHost } from '@shared/sites';
 
 export function createSiteNotifier(repo: SiteRepository) {
   return createNotifier({
@@ -16,7 +17,7 @@ export function createSiteNotifier(repo: SiteRepository) {
     emailConfigured: () => transactionalEmailConfigured(),
     siteUrl: (site) => {
       if (site.status === 'live' && site.customDomain && isValidCustomDomain(site.customDomain)) {
-        return `https://${site.customDomain}/`;
+        return `https://${siteCanonicalHost(site)}/`;
       }
       const base = publicSiteBaseUrl();
       return base ? `${base}/s/${encodeURIComponent(site.slug)}` : null;

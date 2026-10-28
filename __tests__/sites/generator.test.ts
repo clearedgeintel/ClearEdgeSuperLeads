@@ -27,6 +27,7 @@ function fakeRepo() {
         createdBy: input.createdBy ?? null,
         photos: [],
         customDomain: null,
+        customDomainWww: false,
         notifyEmail: null,
         publishedAt: null,
         createdAt: new Date(Date.now() + n).toISOString(),

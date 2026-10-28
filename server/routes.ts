@@ -55,6 +55,8 @@ import { siteRepository, siteGenerator } from "./sites/service";
 import { publicSiteBaseUrl } from "./sites/urls";
 import { isPhotoStorageConfigured, uploadSitePhoto } from "./sites/photos";
 import { previewSecret } from "./sites/previewToken";
+import { checkCustomDomain } from "./sites/domainCheck";
+import dnsPromises from "node:dns/promises";
 
 /**
  * Apply an accepted invitation: upsert the user into the invited workspace +
@@ -280,6 +282,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       generator: siteGenerator,
       publicBaseUrl: publicSiteBaseUrl,
       previewSecret: () => previewSecret(),
+      checkDomain: (site) =>
+        checkCustomDomain(site, {
+          dns: dnsPromises,
+          fetch: (url, init) => fetch(url, init),
+          railwayHost: process.env.PUBLIC_SITE_RAILWAY_HOST || null,
+        }),
       photos: { isConfigured: isPhotoStorageConfigured, upload: uploadSitePhoto },
     }),
   );

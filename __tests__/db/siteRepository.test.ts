@@ -229,3 +229,12 @@ describe('owner notification bookkeeping', () => {
     expect(await repo.notifyWorkspaceMembers('ws-empty', { type: 't', title: 't', body: null, link: null })).toBe(0);
   });
 });
+
+test('the www flag persists and defaults to false', async () => {
+  const s = await repo.create({ data: data('Www Co'), theme: 'slate', workspaceId: 'ws-a' });
+  expect(s.customDomainWww).toBe(false);
+  const u = await repo.updateForWorkspace(s.id, 'ws-a', { customDomain: 'www-co.com', customDomainWww: true });
+  expect(u).toMatchObject({ customDomain: 'www-co.com', customDomainWww: true });
+  // The CHECK still refuses a stored www. prefix.
+  await expect(repo.updateForWorkspace(s.id, 'ws-a', { customDomain: 'www.www-co.com' })).rejects.toThrow();
+});

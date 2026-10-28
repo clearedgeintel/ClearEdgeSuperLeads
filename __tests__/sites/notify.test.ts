@@ -24,6 +24,7 @@ const site: Site = {
   createdBy: null,
   photos: [],
   customDomain: 'acme-roofing.com',
+  customDomainWww: false,
   notifyEmail: 'owner@example.com',
   publishedAt: null,
   createdAt: '2026-10-01T00:00:00.000Z',

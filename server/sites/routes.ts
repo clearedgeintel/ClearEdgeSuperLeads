@@ -25,6 +25,7 @@ import { isValidCustomDomain, normalizeCustomDomain } from './domain';
 import { MAX_PHOTO_BYTES, sniffImageType, type PhotoContentType } from './photos';
 import { renderSite } from './template/render';
 import { makePreviewToken } from './previewToken';
+import type { DomainCheckResult } from './domainCheck';
 
 export const MAX_PHOTOS_PER_SITE = 30;
 
@@ -35,6 +36,8 @@ export interface SitesRouterDeps {
   publicBaseUrl(): string | null;
   /** SITE_PREVIEW_SECRET (shared with the public server), or null when unset. */
   previewSecret(): string | null;
+  /** DNS + HTTPS readiness of a site's custom domain. */
+  checkDomain(site: Site): Promise<DomainCheckResult>;
   photos: {
     isConfigured(): boolean;
     upload(opts: {
@@ -85,6 +88,7 @@ export const patchSchema = z
     photos: z.array(sitePhotoSchema).max(MAX_PHOTOS_PER_SITE).optional(),
     notifyEmail: notifyEmail.optional(),
     customDomain: customDomain.optional(),
+    customDomainWww: z.boolean().optional(),
   })
   .strict()
   .refine((p) => Object.keys(p).length > 0, { message: 'Nothing to update.' });
@@ -219,6 +223,17 @@ export function createSitesRouter(deps: SitesRouterDeps): Router {
       res.json({ url: `/api/sites/${site.id}/preview`, external: false });
     } catch (err) {
       fail(res, err, 'create a preview link');
+    }
+  });
+
+  router.get('/:id/domain-check', aiLimiter, async (req, res) => {
+    try {
+      const site = await repo.getForWorkspace(req.params.id, ws(req));
+      if (!site) return notFound(res);
+      if (!site.customDomain) return res.status(422).json({ message: 'Set a custom domain first.' });
+      res.json(await deps.checkDomain(site));
+    } catch (err) {
+      fail(res, err, 'check that domain');
     }
   });
 

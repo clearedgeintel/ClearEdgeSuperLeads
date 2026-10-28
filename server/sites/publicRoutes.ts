@@ -5,7 +5,7 @@
 import express, { Router, type Request, type RequestHandler, type Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { z } from 'zod';
-import { THEMES_LIST, type Site, type Theme } from '@shared/sites';
+import { THEMES_LIST, siteCanonicalHost, type Site, type Theme } from '@shared/sites';
 import type { SiteRepository } from './repository';
 import type { SiteNotifier } from './notify';
 import { renderSite } from './template/render';
@@ -274,7 +274,7 @@ export function createPublicApp(deps: PublicAppDeps): express.Express {
       }
 
       if (site.status === 'live' && site.customDomain && isValidCustomDomain(site.customDomain)) {
-        return res.redirect(301, `https://${site.customDomain}/`);
+        return res.redirect(301, `https://${siteCanonicalHost(site)}/`);
       }
 
       const pageUrl = `${baseUrlFor(req)}/s/${encodeURIComponent(site.slug)}`;
@@ -295,12 +295,22 @@ export function createPublicApp(deps: PublicAppDeps): express.Express {
 
   const onDomain = Router();
   const domainSite = (res: Response) => res.locals.site as Site;
+  const canonicalOf = (res: Response) => siteCanonicalHost(domainSite(res))!;
+
+  // One canonical host per site: apex ↔ www requests that reach us redirect.
+  onDomain.use((req, res, next) => {
+    const canonical = canonicalOf(res);
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.hostname.toLowerCase() !== canonical) {
+      return res.redirect(301, `https://${canonical}${req.originalUrl}`);
+    }
+    next();
+  });
 
   onDomain.get('/', (req, res) => {
     const site = domainSite(res);
     sendSite(req, res, {
       site,
-      pageUrl: `https://${site.customDomain}/`,
+      pageUrl: `https://${canonicalOf(res)}/`,
       submitUrl: '/contact',
       pixelUrl: '/pixel.gif',
       variant: 'domain',
@@ -321,8 +331,7 @@ export function createPublicApp(deps: PublicAppDeps): express.Express {
   onDomain.get('/pixel.gif', (req, res) => sendPixel(req, res, domainSite(res)));
 
   onDomain.get('/robots.txt', (_req, res) => {
-    const site = domainSite(res);
-    res.type('text/plain').send(`User-agent: *\nAllow: /\nSitemap: https://${site.customDomain}/sitemap.xml\n`);
+    res.type('text/plain').send(`User-agent: *\nAllow: /\nSitemap: https://${canonicalOf(res)}/sitemap.xml\n`);
   });
 
   onDomain.get('/sitemap.xml', (_req, res) => {
@@ -331,7 +340,7 @@ export function createPublicApp(deps: PublicAppDeps): express.Express {
     res
       .type('application/xml')
       .send(
-        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://${site.customDomain}/</loc><lastmod>${lastmod}</lastmod></url>\n</urlset>\n`
+        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://${canonicalOf(res)}/</loc><lastmod>${lastmod}</lastmod></url>\n</urlset>\n`
       );
   });
 
